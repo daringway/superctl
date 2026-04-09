@@ -1,0 +1,35 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@std/assert@^1.0.14": "1.0.14",
+    "jsr:@std/internal@^1.0.10": "1.0.12",
+    "jsr:@std/json@^1.0.2": "1.0.2",
+    "jsr:@std/jsonc@^1.0.2": "1.0.2"
+  },
+  "jsr": {
+    "@std/assert@1.0.14": {
+      "integrity": "68d0d4a43b365abc927f45a9b85c639ea18a9fab96ad92281e493e4ed84abaa4",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/internal@1.0.12": {
+      "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
+    },
+    "@std/json@1.0.2": {
+      "integrity": "d9e5497801c15fb679f55a2c01c7794ad7a5dfda4dd1bebab5e409cb5e0d34d4"
+    },
+    "@std/jsonc@1.0.2": {
+      "integrity": "909605dae3af22bd75b1cbda8d64a32cf1fd2cf6efa3f9e224aba6d22c0f44c7",
+      "dependencies": [
+        "jsr:@std/json"
+      ]
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@std/assert@^1.0.14",
+      "jsr:@std/jsonc@^1.0.2"
+    ]
+  }
+}
