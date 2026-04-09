@@ -1,0 +1,74 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    name: Build ${{ matrix.asset_name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            asset_name: superctl_linux_x64.tar.gz
+            binary_name: superctl
+          - target: aarch64-unknown-linux-gnu
+            asset_name: superctl_linux_arm64.tar.gz
+            binary_name: superctl
+          - target: x86_64-apple-darwin
+            asset_name: superctl_macos_x64.tar.gz
+            binary_name: superctl
+          - target: aarch64-apple-darwin
+            asset_name: superctl_macos_arm64.tar.gz
+            binary_name: superctl
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Compile binary
+        run: |
+          mkdir -p dist/package
+          deno compile -A --target "${{ matrix.target }}" --output "dist/package/${{ matrix.binary_name }}" main.ts
+          cp README.md dist/package/README.md
+          tar -C dist/package -czf "dist/${{ matrix.asset_name }}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz

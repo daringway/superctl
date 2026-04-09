@@ -1,0 +1,39 @@
+{
+  "version": "0.1.2",
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.14",
+    "@std/jsonc": "jsr:@std/jsonc@^1.0.2"
+  },
+  "tasks": {
+    "build": {
+      "description": "Type-check the CLI entrypoint, source files, and tests",
+      "command": "deno check --config deno.json main.ts src/*.ts tests/*.ts"
+    },
+    "lint": {
+      "description": "Lint the superctl workspace",
+      "command": "deno lint --config deno.json ."
+    },
+    "typecheck": {
+      "description": "Type-check the CLI entrypoint, source files, and tests",
+      "command": "deno check --config deno.json main.ts src/*.ts tests/*.ts"
+    },
+    "test": {
+      "description": "Run the superctl test suite",
+      "command": "deno test --config deno.json --allow-env --allow-read --allow-write --allow-run tests"
+    },
+    "check": {
+      "description": "Run format, lint, type-check, and tests for superctl",
+      "command": "deno fmt --check . && deno task lint && deno task typecheck && deno task test"
+    },
+    "compile": {
+      "description": "Compile the superctl binary to dist/superctl",
+      "command": "deno compile -A --output dist/superctl main.ts"
+    }
+  },
+  "exclude": [
+    ".idea"
+  ],
+  "fmt": {
+    "lineWidth": 100
+  }
+}
