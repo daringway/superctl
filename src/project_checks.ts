@@ -9,6 +9,15 @@ export const REQUIRED_AGENT_DOCS_PATHS = [
   "agent-docs/exec-plans/active",
   "agent-docs/exec-plans/completed",
 ] as const;
+const ALLOWED_ROOT_TEST_DIRS = [
+  "e2e",
+  "db",
+  "bruno",
+  "smoke",
+  "fixtures",
+  "harness",
+] as const;
+const DISALLOWED_ROOT_TEST_DIRS = ["bruno", "e2e", "test", "integration", "__tests__"] as const;
 
 export async function hasProjectManifest(root: URL): Promise<boolean> {
   try {
@@ -127,6 +136,62 @@ export async function verifyServiceDbBoundaries(root: URL): Promise<void> {
   }
 }
 
+export async function verifyTestLayout(root: URL): Promise<void> {
+  const issues = await listTestLayoutIssues(root);
+  if (issues.length > 0) {
+    throw new Error(issues[0]);
+  }
+}
+
+export async function listTestLayoutIssues(root: URL): Promise<string[]> {
+  const issues: string[] = [];
+
+  for (const relativePath of DISALLOWED_ROOT_TEST_DIRS) {
+    const entry = await statPathIfExists(root, relativePath);
+    if (entry?.isDirectory) {
+      issues.push(
+        `Repo-root "${relativePath}/" is not allowed. Move it under "tests/" and use one of tests/{${
+          ALLOWED_ROOT_TEST_DIRS.join(",")
+        }}/.`,
+      );
+    }
+  }
+
+  const testsEntry = await statPathIfExists(root, "tests");
+  if (!testsEntry) {
+    return issues;
+  }
+  if (!testsEntry.isDirectory) {
+    issues.push('Expected "tests" to be a directory.');
+    return issues;
+  }
+
+  for await (const entry of Deno.readDir(new URL("tests/", root))) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+
+    if (!entry.isDirectory) {
+      issues.push(
+        `Repo-root tests must organize files under tests/{${
+          ALLOWED_ROOT_TEST_DIRS.join(",")
+        }}/. Found "tests/${entry.name}".`,
+      );
+      continue;
+    }
+
+    if (!ALLOWED_ROOT_TEST_DIRS.includes(entry.name as (typeof ALLOWED_ROOT_TEST_DIRS)[number])) {
+      issues.push(
+        `Repo-root "tests/${entry.name}/" is not allowed. Use one of tests/{${
+          ALLOWED_ROOT_TEST_DIRS.join(",")
+        }}/.`,
+      );
+    }
+  }
+
+  return issues;
+}
+
 async function requireFile(root: URL, relativePath: string): Promise<void> {
   const entry = await statPath(root, relativePath);
   if (!entry.isFile) {
@@ -147,6 +212,17 @@ async function statPath(root: URL, relativePath: string): Promise<Deno.FileInfo>
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       throw new Error(`Missing required path "${relativePath}".`);
+    }
+    throw error;
+  }
+}
+
+async function statPathIfExists(root: URL, relativePath: string): Promise<Deno.FileInfo | null> {
+  try {
+    return await Deno.stat(new URL(relativePath, root));
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return null;
     }
     throw error;
   }

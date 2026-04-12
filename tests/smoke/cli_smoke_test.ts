@@ -1,8 +1,8 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 
-import { SUPERCTL_VERSION } from "../src/version.ts";
+import { SUPERCTL_VERSION } from "../../src/version.ts";
 
-const CLI_ENTRYPOINT = new URL("../main.ts", import.meta.url);
+const CLI_ENTRYPOINT = new URL("../../main.ts", import.meta.url);
 
 interface CliResult {
   code: number;

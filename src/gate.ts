@@ -15,6 +15,7 @@ import {
   verifyManifestFiles,
   verifyRequiredTasks,
   verifyServiceDbBoundaries,
+  verifyTestLayout,
 } from "./project_checks.ts";
 
 export interface GateCommandInvocation {
@@ -39,6 +40,7 @@ export async function gateProject(
       ? [createSummaryStep("Manifest files"), createSummaryStep("Service DB boundaries")]
       : []),
     createSummaryStep("Required tasks"),
+    createSummaryStep("Test layout"),
     createSummaryStep("Format check"),
     createSummaryStep("Lint"),
     createSummaryStep("Exec plan completion"),
@@ -69,6 +71,11 @@ export async function gateProject(
     failures,
     "Required tasks",
     runGateCheckStep(steps[index++], () => verifyRequiredTasks(root, requiredTasks)),
+  );
+  await collectGateFailure(
+    failures,
+    "Test layout",
+    runGateCheckStep(steps[index++], () => verifyTestLayout(root)),
   );
 
   await collectGateFailure(

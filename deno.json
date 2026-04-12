@@ -7,7 +7,7 @@
   "tasks": {
     "build": {
       "description": "Type-check the CLI entrypoint, source files, and tests",
-      "command": "deno check --config deno.json main.ts src/*.ts tests/*.ts"
+      "command": "deno check --config deno.json main.ts src/*.ts tests/smoke/*.ts"
     },
     "lint": {
       "description": "Lint the superctl workspace",
@@ -15,15 +15,15 @@
     },
     "typecheck": {
       "description": "Type-check the CLI entrypoint, source files, and tests",
-      "command": "deno check --config deno.json main.ts src/*.ts tests/*.ts"
+      "command": "deno check --config deno.json main.ts src/*.ts tests/smoke/*.ts"
     },
     "test:unit": {
       "description": "Run the superctl test suite",
-      "command": "deno test --config deno.json --allow-env --allow-read --allow-write --allow-run --ignore=tests/cli_smoke_test.ts tests"
+      "command": "deno test --config deno.json --allow-env --allow-read --allow-write --allow-run src"
     },
     "test:e2e": {
       "description": "Run the superctl CLI smoke tests",
-      "command": "deno test --config deno.json --allow-read --allow-run tests/cli_smoke_test.ts"
+      "command": "deno test --config deno.json --allow-read --allow-run tests/smoke/cli_smoke_test.ts"
     },
     "check": {
       "description": "Run format, lint, type-check, and tests for superctl",

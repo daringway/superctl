@@ -9,6 +9,7 @@ import {
   loadDenoProjectTasks,
 } from "./deno_config.ts";
 import { cwdRootUrl } from "./paths.ts";
+import { listTestLayoutIssues } from "./project_checks.ts";
 import { loadProjectManifest, ProjectManifest } from "./project.ts";
 import { SUPERCTL_VERSION } from "./version.ts";
 
@@ -21,7 +22,7 @@ const QUALITY_WORKFLOW_FILES = [
 const STARTER_PLATFORM_ROOT_FILES = [
   "scripts/start.ts",
   "scripts/dev.ts",
-  "tests/runtime_smoke_test.ts",
+  "tests/smoke/runtime_smoke_test.ts",
 ] as const;
 const LOCAL_SUPERCTL_PLUGIN_FILES = [
   ".mise-plugins/superctl/bin/install",
@@ -119,6 +120,7 @@ async function inspectProjectConfiguration(root: URL): Promise<DoctorFinding[]> 
   }
 
   await inspectQualityWorkflow(root, findings);
+  await inspectTestLayout(root, findings);
   await inspectLocalSuperctlMode(root, findings);
 
   const manifest = await loadManifestSafely(root, findings);
@@ -169,6 +171,15 @@ async function inspectQualityWorkflow(root: URL, findings: DoctorFinding[]): Pro
       severity: "error",
       message:
         `GitHub Actions quality workflow "${workflowFile}" must run "superctl gate", "superctl verify", and "superctl audit" or the legacy "deno task check".`,
+    });
+  }
+}
+
+async function inspectTestLayout(root: URL, findings: DoctorFinding[]): Promise<void> {
+  for (const issue of await listTestLayoutIssues(root)) {
+    findings.push({
+      severity: "error",
+      message: issue,
     });
   }
 }

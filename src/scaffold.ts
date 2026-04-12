@@ -345,6 +345,8 @@ async function addStarterSiteSurface(projectName: string, root: URL): Promise<vo
 }
 
 async function writeStarterDenoConfig(root: URL, platformRoot: string): Promise<void> {
+  const unitTestIgnore =
+    "tests/e2e,tests/smoke,tests/db,tests/bruno,tests/fixtures,tests/harness,node_modules,dist,coverage";
   await writeJsonFile(new URL("deno.json", root), {
     nodeModulesDir: "auto",
     imports: {
@@ -379,11 +381,11 @@ async function writeStarterDenoConfig(root: URL, platformRoot: string): Promise<
         "scripts/dev.ts",
         "superstructure/surfaces/site/index.ts",
         "superstructure/surfaces/site/surface.tsx",
-        "tests/runtime_smoke_test.ts",
+        "tests/smoke/runtime_smoke_test.ts",
       ].join(" "),
-      "test:unit": "deno test -A tests",
-      "test:coverage": "deno test -A --coverage=coverage tests",
-      "test:e2e": "deno test -A tests/runtime_smoke_test.ts",
+      "test:unit": `deno test -A . --ignore=${unitTestIgnore}`,
+      "test:coverage": `deno test -A --coverage=coverage . --ignore=${unitTestIgnore}`,
+      "test:e2e": "deno test -A tests/smoke/runtime_smoke_test.ts",
       check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
     },
     fmt: {
@@ -573,10 +575,10 @@ async function writeStarterTests(
   projectName: string,
   platformRoot: string,
 ): Promise<void> {
-  await Deno.mkdir(new URL("tests/", root), { recursive: true });
+  await Deno.mkdir(new URL("tests/smoke/", root), { recursive: true });
 
   await Deno.writeTextFile(
-    new URL("tests/runtime_smoke_test.ts", root),
+    new URL("tests/smoke/runtime_smoke_test.ts", root),
     [
       "import { createServerApp } from '@daringway/superstructure-runtime';",
       "",

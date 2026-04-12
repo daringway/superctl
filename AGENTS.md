@@ -19,3 +19,5 @@ application verification, and security audit flows.
 - Use `deno run -A main.ts gate` for repo-local PR-policy checks.
 - Keep `verify` test-only.
 - Keep `audit` security-only.
+- Keep repo-root `tests/` reserved for smoke, e2e, fixtures, harnesses, and other non-unit suites.
+- Keep unit tests next to `src/` ownership and enforce layout policy through `gate` and `doctor`.

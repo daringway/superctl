@@ -6,14 +6,14 @@ import {
 } from "@std/assert";
 import { join, resolve } from "node:path";
 
-import { auditProject, findSecretScanIssues } from "../src/audit.ts";
-import { doctorProject } from "../src/doctor.ts";
-import { extractPlanStatus, gateProject } from "../src/gate.ts";
+import { auditProject, findSecretScanIssues } from "./audit.ts";
+import { doctorProject } from "./doctor.ts";
+import { extractPlanStatus, gateProject } from "./gate.ts";
 import { main } from "../main.ts";
-import { buildProject, devProject, startProject } from "../src/run.ts";
-import { addService, addSurface, initProject } from "../src/scaffold.ts";
-import { verifyProject } from "../src/verify.ts";
-import { SUPERCTL_VERSION } from "../src/version.ts";
+import { buildProject, devProject, startProject } from "./run.ts";
+import { addService, addSurface, initProject } from "./scaffold.ts";
+import { verifyProject } from "./verify.ts";
+import { SUPERCTL_VERSION } from "./version.ts";
 
 async function captureConsoleLog(run: () => Promise<void>): Promise<string[]> {
   const messages: string[] = [];
@@ -213,6 +213,9 @@ async function writeFakePlatformRoot(platformRootPath: string): Promise<void> {
   await Deno.writeTextFile(runtimeEntryPath, "export {};\n");
 }
 
+const STARTER_UNIT_TEST_IGNORE =
+  "tests/e2e,tests/smoke,tests/db,tests/bruno,tests/fixtures,tests/harness,node_modules,dist,coverage";
+
 Deno.test("usage rejects unknown commands", async () => {
   await assertRejects(
     () => main(["nope"]),
@@ -263,7 +266,7 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     const startScript = await Deno.readTextFile(new URL("scripts/start.ts", fixture.root));
     const devScript = await Deno.readTextFile(new URL("scripts/dev.ts", fixture.root));
     const runtimeSmokeTest = await Deno.readTextFile(
-      new URL("tests/runtime_smoke_test.ts", fixture.root),
+      new URL("tests/smoke/runtime_smoke_test.ts", fixture.root),
     );
     const agents = await Deno.readTextFile(new URL("AGENTS.md", fixture.root));
     const agentDocsReadme = await Deno.readTextFile(new URL("agent-docs/README.md", fixture.root));
@@ -380,10 +383,10 @@ Deno.test("doctor rejects missing starter platform roots", async () => {
         dev: "deno run -A scripts/dev.ts",
         lint: "deno lint scripts tests superstructure",
         typecheck:
-          "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/runtime_smoke_test.ts",
-        "test:unit": "deno test -A tests",
-        "test:coverage": "deno test -A --coverage=coverage tests",
-        "test:e2e": "deno test -A tests/runtime_smoke_test.ts",
+          "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/smoke/runtime_smoke_test.ts",
+        "test:unit": `deno test -A . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
+        "test:coverage": `deno test -A --coverage=coverage . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
+        "test:e2e": "deno test -A tests/smoke/runtime_smoke_test.ts",
         check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
       },
       {
@@ -421,10 +424,10 @@ Deno.test("doctor rejects platform roots without the runtime entrypoint", async 
         dev: "deno run -A scripts/dev.ts",
         lint: "deno lint scripts tests superstructure",
         typecheck:
-          "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/runtime_smoke_test.ts",
-        "test:unit": "deno test -A tests",
-        "test:coverage": "deno test -A --coverage=coverage tests",
-        "test:e2e": "deno test -A tests/runtime_smoke_test.ts",
+          "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/smoke/runtime_smoke_test.ts",
+        "test:unit": `deno test -A . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
+        "test:coverage": `deno test -A --coverage=coverage . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
+        "test:e2e": "deno test -A tests/smoke/runtime_smoke_test.ts",
         check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
       },
       {
@@ -448,7 +451,7 @@ for (
   const relativePath of [
     "scripts/start.ts",
     "scripts/dev.ts",
-    "tests/runtime_smoke_test.ts",
+    "tests/smoke/runtime_smoke_test.ts",
   ] as const
 ) {
   Deno.test(`doctor catches PLATFORM_ROOT drift in ${relativePath}`, async () => {
@@ -1004,10 +1007,89 @@ Deno.test("gate prints a summary when a step fails", async () => {
     assertStringIncludes(output, "Gate summary");
     assertStringIncludes(output, "✓ Project structure: 1 of 1 passed");
     assertStringIncludes(output, "✓ Required tasks: 1 of 1 passed");
+    assertStringIncludes(output, "✓ Test layout: 1 of 1 passed");
     assertStringIncludes(output, "✓ Format check: 1 of 1 passed");
     assertStringIncludes(output, "✗ Lint: 0 of 1 passed");
     assertStringIncludes(output, "✓ Exec plan completion: 1 of 1 passed");
-    assertStringIncludes(output, "Overall: FAILED (4 passed, 1 failed)");
+    assertStringIncludes(output, "Overall: FAILED (5 passed, 1 failed)");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("doctor rejects repo-root tests files outside allowed subdirectories", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-doctor-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      build: "echo build",
+      start: "echo start",
+      dev: "echo dev",
+      check: "echo check",
+      "test:unit": "echo test",
+      "test:coverage": "echo coverage",
+      "test:e2e": "echo e2e",
+    });
+    await writeQualityWorkflow(root);
+    await writeProjectManifest(root, {
+      schemaVersion: 1,
+      services: [],
+      surfaces: [
+        {
+          name: "site",
+          directory: "superstructure/surfaces/site",
+          path: "/site",
+          enabled: true,
+          rootEligible: true,
+        },
+      ],
+      deployment: {
+        rootSurface: "site",
+      },
+    });
+    await Deno.mkdir(new URL("tests/", root), { recursive: true });
+    await Deno.writeTextFile(new URL("tests/site-contract.test.ts", root), "export {};\n");
+
+    const messages = await captureDoctorFailure(root);
+    assertStringIncludes(
+      messages.join("\n"),
+      'Repo-root tests must organize files under tests/{e2e,db,bruno,smoke,fixtures,harness}/. Found "tests/site-contract.test.ts".',
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gate rejects repo-root ad hoc test directories", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-gate-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      lint: "echo lint",
+      build: "echo build",
+      start: "echo start",
+      dev: "echo dev",
+      check: "echo check",
+      "test:unit": "echo test",
+      "test:coverage": "echo coverage",
+      "test:e2e": "echo e2e",
+    });
+    await Deno.writeTextFile(new URL("AGENTS.md", root), "# AGENTS\n");
+    await Deno.mkdir(new URL("agent-docs/exec-plans/active/", root), { recursive: true });
+    await Deno.mkdir(new URL("agent-docs/exec-plans/completed/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("agent-docs/exec-plans/completed/0001-gate.md", root),
+      "# Gate\n\n## Status\n\nCompleted.\n",
+    );
+    await Deno.mkdir(new URL("bruno/", root), { recursive: true });
+
+    await assertRejects(
+      () => gateProject(root, () => Promise.resolve()),
+      Error,
+      'Repo-root "bruno/" is not allowed.',
+    );
   } finally {
     await Deno.remove(root, { recursive: true });
   }
