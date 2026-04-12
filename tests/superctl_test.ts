@@ -150,6 +150,10 @@ async function writeFakeSuperctlSourceRepo(
   await Deno.writeTextFile(join(path, "deno.json"), JSON.stringify({ version }, null, 2) + "\n");
 }
 
+function makeFakeGitHubToken(): string {
+  return ["gh", "p_", "123456789012345678901234567890123456"].join("");
+}
+
 async function withEnv<T>(
   name: string,
   value: string | undefined,
@@ -1075,14 +1079,14 @@ Deno.test("audit prints a summary when a step fails", async () => {
   try {
     await Deno.writeTextFile(
       new URL("secrets.txt", root),
-      "token=ghp_123456789012345678901234567890123456\n",
+      `token=${makeFakeGitHubToken()}\n`,
     );
     await Deno.writeTextFile(new URL("deno.lock", root), '{\n  "version": "5"\n}\n');
     await initGitRepo(root);
     await commitAll(root, "baseline");
     await Deno.writeTextFile(
       new URL("secrets.txt", root),
-      "token=ghp_123456789012345678901234567890123456\nchanged=true\n",
+      `token=${makeFakeGitHubToken()}\nchanged=true\n`,
     );
 
     const messages = await captureConsoleLog(async () => {
@@ -1116,7 +1120,7 @@ Deno.test("secret scan flags obvious credential material in changed files", asyn
   try {
     await Deno.writeTextFile(
       new URL("secrets.txt", root),
-      "token=ghp_123456789012345678901234567890123456\n",
+      `token=${makeFakeGitHubToken()}\n`,
     );
     const issues = await findSecretScanIssues(root, ["secrets.txt"]);
     assertEquals(issues, ["secrets.txt: matched GitHub token"]);

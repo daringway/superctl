@@ -19,7 +19,11 @@
     },
     "test:unit": {
       "description": "Run the superctl test suite",
-      "command": "deno test --config deno.json --allow-env --allow-read --allow-write --allow-run tests"
+      "command": "deno test --config deno.json --allow-env --allow-read --allow-write --allow-run --ignore=tests/cli_smoke_test.ts tests"
+    },
+    "test:e2e": {
+      "description": "Run the superctl CLI smoke tests",
+      "command": "deno test --config deno.json --allow-read --allow-run tests/cli_smoke_test.ts"
     },
     "check": {
       "description": "Run format, lint, type-check, and tests for superctl",
