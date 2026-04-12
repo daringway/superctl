@@ -17,13 +17,13 @@
       "description": "Type-check the CLI entrypoint, source files, and tests",
       "command": "deno check --config deno.json main.ts src/*.ts tests/*.ts"
     },
-    "test": {
+    "test:unit": {
       "description": "Run the superctl test suite",
       "command": "deno test --config deno.json --allow-env --allow-read --allow-write --allow-run tests"
     },
     "check": {
       "description": "Run format, lint, type-check, and tests for superctl",
-      "command": "deno fmt --check . && deno task lint && deno task typecheck && deno task test"
+      "command": "deno fmt --check . && deno task lint && deno task typecheck && deno task test:unit"
     },
     "compile": {
       "description": "Compile the superctl binary to dist/superctl",

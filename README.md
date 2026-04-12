@@ -14,6 +14,8 @@ superctl add surface <name>
 superctl build
 superctl start
 superctl dev
+superctl audit
+superctl gate
 superctl verify
 superctl doctor
 ```
@@ -22,6 +24,12 @@ superctl doctor
 bootstraps the current directory with a runnable Superstructure starter: `deno.json`, runtime
 scripts, a smoke test, a GitHub Actions quality workflow, generated registries, and a default HTML
 `site` surface so `superctl start` can serve a welcome page immediately.
+
+`superctl gate` is the PR-quality and policy command. It runs format and lint checks, validates the
+project structure contract, and enforces the completed exec-plan rule. `superctl verify` is
+test-only. It requires `test:unit` plus `test:e2e`, and also runs optional `test:bruno` and
+`test:ai` tasks when the project defines them. `superctl audit` is security-only. It runs secret
+scanning and dependency vulnerability checks as a separate, more expensive PR check.
 
 ## Install
 
@@ -51,7 +59,7 @@ deno task check
 
 - project initialization
 - project scaffolding
-- project verification
+- project gate, verification, and audit
 - wrapper commands that delegate to repo-local `deno task build/start/dev`
 - future project init, upgrades, and AUTOPILOT connection flows
 

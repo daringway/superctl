@@ -13,7 +13,7 @@ import { loadProjectManifest, ProjectManifest } from "./project.ts";
 import { SUPERCTL_VERSION } from "./version.ts";
 
 const REQUIRED_DENO_TASKS = ["build", "start", "dev", "check"] as const;
-const REQUIRED_TEST_TASKS = ["test", "test:coverage", "test:e2e"] as const;
+const REQUIRED_TEST_TASKS = ["test:unit", "test:coverage", "test:e2e"] as const;
 const QUALITY_WORKFLOW_FILES = [
   ".github/workflows/quality.yml",
   ".github/workflows/quality.yaml",
@@ -160,10 +160,15 @@ async function inspectQualityWorkflow(root: URL, findings: DoctorFinding[]): Pro
     });
   }
 
-  if (!source.includes("deno task check")) {
+  const runsGateAndVerifyAndAudit = source.includes("main.ts gate") &&
+    source.includes("main.ts verify") &&
+    source.includes("main.ts audit");
+  const runsLegacyCheck = source.includes("deno task check");
+  if (!runsGateAndVerifyAndAudit && !runsLegacyCheck) {
     findings.push({
       severity: "error",
-      message: `GitHub Actions quality workflow "${workflowFile}" must run "deno task check".`,
+      message:
+        `GitHub Actions quality workflow "${workflowFile}" must run "superctl gate", "superctl verify", and "superctl audit" or the legacy "deno task check".`,
     });
   }
 }

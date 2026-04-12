@@ -1,4 +1,6 @@
+import { auditProject } from "./src/audit.ts";
 import { doctorProject } from "./src/doctor.ts";
+import { gateProject } from "./src/gate.ts";
 import { cwdRootUrl } from "./src/paths.ts";
 import { buildProject, devProject, startProject } from "./src/run.ts";
 import { addService, addSurface, initProject } from "./src/scaffold.ts";
@@ -16,6 +18,8 @@ function usage(): string {
     "  superctl build",
     "  superctl start",
     "  superctl dev",
+    "  superctl audit",
+    "  superctl gate",
     "  superctl verify",
     "  superctl doctor",
   ].join("\n");
@@ -76,6 +80,18 @@ export async function main(args: string[]): Promise<void> {
         throw new Error(`Unexpected arguments for "dev".\n\n${usage()}`);
       }
       await devProject(root);
+      return;
+    case "audit":
+      if (rest.length > 0) {
+        throw new Error(`Unexpected arguments for "${command}".\n\n${usage()}`);
+      }
+      await auditProject(root);
+      return;
+    case "gate":
+      if (rest.length > 0) {
+        throw new Error(`Unexpected arguments for "${command}".\n\n${usage()}`);
+      }
+      await gateProject(root);
       return;
     case "verify":
       if (rest.length > 0) {

@@ -6,8 +6,10 @@ import {
 } from "@std/assert";
 import { join, resolve } from "node:path";
 
-import { main } from "../main.ts";
+import { auditProject, findSecretScanIssues } from "../src/audit.ts";
 import { doctorProject } from "../src/doctor.ts";
+import { extractPlanStatus, gateProject } from "../src/gate.ts";
+import { main } from "../main.ts";
 import { buildProject, devProject, startProject } from "../src/run.ts";
 import { addService, addSurface, initProject } from "../src/scaffold.ts";
 import { verifyProject } from "../src/verify.ts";
@@ -68,13 +70,54 @@ async function writeQualityWorkflow(root: URL, source?: string): Promise<void> {
         "  workflow_dispatch:",
         "",
         "jobs:",
-        "  check:",
+        "  gate:",
         "    runs-on: ubuntu-latest",
         "    steps:",
-        "      - run: deno task check",
+        "      - run: deno run -A .github/tools/superctl/main.ts gate",
+        "",
+        "  verify:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: deno run -A .github/tools/superctl/main.ts verify",
+        "",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: deno run -A .github/tools/superctl/main.ts audit",
         "",
       ].join("\n"),
   );
+}
+
+async function runGit(
+  root: URL,
+  args: string[],
+): Promise<void> {
+  const child = new Deno.Command("git", {
+    args,
+    cwd: decodeURIComponent(root.pathname),
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await child.output();
+  if (!output.success) {
+    throw new Error(
+      new TextDecoder().decode(output.stderr).trim() || `git ${args.join(" ")} failed`,
+    );
+  }
+}
+
+async function initGitRepo(root: URL): Promise<void> {
+  await runGit(root, ["init", "-b", "test"]);
+  await runGit(root, ["config", "user.name", "Test User"]);
+  await runGit(root, ["config", "user.email", "test@example.com"]);
+  await Deno.mkdir(new URL(".git-hooks/", root), { recursive: true });
+  await runGit(root, ["config", "core.hooksPath", ".git-hooks"]);
+}
+
+async function commitAll(root: URL, message: string): Promise<void> {
+  await runGit(root, ["add", "."]);
+  await runGit(root, ["commit", "-m", message]);
 }
 
 async function writeMiseTools(root: URL, toolEntries: Record<string, string>): Promise<void> {
@@ -181,6 +224,14 @@ Deno.test("version commands print the current superctl version", async () => {
   }
 });
 
+Deno.test("help lists audit alongside gate and verify", async () => {
+  const messages = await captureConsoleLog(() => main(["help"]));
+  const output = messages.join("\n");
+  assertStringIncludes(output, "superctl gate");
+  assertStringIncludes(output, "superctl verify");
+  assertStringIncludes(output, "superctl audit");
+});
+
 Deno.test("init bootstraps a new project with the default site surface", async () => {
   const fixture = await createInitFixture();
 
@@ -210,6 +261,8 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     const runtimeSmokeTest = await Deno.readTextFile(
       new URL("tests/runtime_smoke_test.ts", fixture.root),
     );
+    const agents = await Deno.readTextFile(new URL("AGENTS.md", fixture.root));
+    const agentDocsReadme = await Deno.readTextFile(new URL("agent-docs/README.md", fixture.root));
     const qualityWorkflow = await Deno.readTextFile(
       new URL(".github/workflows/quality.yml", fixture.root),
     );
@@ -225,11 +278,11 @@ Deno.test("init bootstraps a new project with the default site surface", async (
         "dev",
         "lint",
         "start",
-        "test",
+        "test:unit",
         "test:coverage",
         "test:e2e",
         "typecheck",
-      ],
+      ].sort(),
     );
     assertStringIncludes(surfacesRegistry, "SiteSurfaceModule");
     assertStringIncludes(siteIndex, "export const SiteSurfaceModule");
@@ -241,8 +294,15 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     assertEquals(startScript, devScript);
     assertStringIncludes(runtimeSmokeTest, "starter site renders a welcome page at root and /site");
     assertStringIncludes(runtimeSmokeTest, "/api/system/health");
+    assertStringIncludes(agents, "agent-docs/exec-plans/active/");
+    assertStringIncludes(agentDocsReadme, "exec-plans/completed/");
+    await Deno.stat(new URL("agent-docs/exec-plans/active/.gitkeep", fixture.root));
+    await Deno.stat(new URL("agent-docs/exec-plans/completed/.gitkeep", fixture.root));
     assertStringIncludes(qualityWorkflow, "pull_request");
-    assertStringIncludes(qualityWorkflow, "deno task check");
+    assertStringIncludes(qualityWorkflow, "Superctl Gate");
+    assertStringIncludes(qualityWorkflow, "main.ts gate");
+    assertStringIncludes(qualityWorkflow, "main.ts verify");
+    assertStringIncludes(qualityWorkflow, "main.ts audit");
   } finally {
     await fixture.cleanup();
   }
@@ -317,10 +377,10 @@ Deno.test("doctor rejects missing starter platform roots", async () => {
         lint: "deno lint scripts tests superstructure",
         typecheck:
           "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/runtime_smoke_test.ts",
-        test: "deno test -A tests",
+        "test:unit": "deno test -A tests",
         "test:coverage": "deno test -A --coverage=coverage tests",
         "test:e2e": "deno test -A tests/runtime_smoke_test.ts",
-        check: "deno task lint && deno task typecheck && deno task test && deno task build",
+        check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
       },
       {
         superstructure: {
@@ -358,10 +418,10 @@ Deno.test("doctor rejects platform roots without the runtime entrypoint", async 
         lint: "deno lint scripts tests superstructure",
         typecheck:
           "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/runtime_smoke_test.ts",
-        test: "deno test -A tests",
+        "test:unit": "deno test -A tests",
         "test:coverage": "deno test -A --coverage=coverage tests",
         "test:e2e": "deno test -A tests/runtime_smoke_test.ts",
-        check: "deno task lint && deno task typecheck && deno task test && deno task build",
+        check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
       },
       {
         superstructure: {
@@ -576,7 +636,7 @@ Deno.test("doctor reports healthy configuration without running verification", a
       start: "echo start",
       dev: "echo dev",
       check: "echo check",
-      test: "echo test",
+      "test:unit": "echo test",
       "test:coverage": "echo coverage",
       "test:e2e": "echo e2e",
     });
@@ -616,7 +676,7 @@ Deno.test("doctor reports root surface misconfiguration", async () => {
       start: "echo start",
       dev: "echo dev",
       check: "echo check",
-      test: "echo test",
+      "test:unit": "echo test",
       "test:coverage": "echo coverage",
       "test:e2e": "echo e2e",
     });
@@ -650,7 +710,7 @@ Deno.test("doctor reports missing quality workflow", async () => {
       start: "echo start",
       dev: "echo dev",
       check: "echo check",
-      test: "echo test",
+      "test:unit": "echo test",
       "test:coverage": "echo coverage",
       "test:e2e": "echo e2e",
     });
@@ -705,7 +765,7 @@ Deno.test("add service and surface scaffold manifest entries and generated regis
       start: "echo start",
       dev: "echo dev",
       check: "echo check",
-      test: "echo test",
+      "test:unit": "echo test",
       "test:coverage": "echo coverage",
       "test:e2e": "echo e2e",
     });
@@ -747,8 +807,8 @@ Deno.test("add service and surface scaffold manifest entries and generated regis
   }
 });
 
-Deno.test("verify rejects custom services importing platform DB internals", async () => {
-  const rootPath = await Deno.makeTempDir({ prefix: "superctl-verify-fixture-" });
+Deno.test("gate rejects custom services importing platform DB internals", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-gate-fixture-" });
   const root = new URL(`file://${rootPath}/`);
 
   try {
@@ -757,10 +817,20 @@ Deno.test("verify rejects custom services importing platform DB internals", asyn
       start: "echo start",
       dev: "echo dev",
       check: "echo check",
-      test: "echo test",
+      lint: "echo lint",
+      "test:unit": "echo test",
       "test:coverage": "echo coverage",
       "test:e2e": "echo e2e",
     });
+    await Deno.writeTextFile(new URL("AGENTS.md", root), "# AGENTS\n");
+    await Deno.mkdir(new URL("agent-docs/exec-plans/completed/", root), { recursive: true });
+    await Deno.mkdir(new URL("agent-docs/exec-plans/active/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("agent-docs/exec-plans/completed/0001-test.md", root),
+      "# Test Plan\n\n## Status\n\nCompleted.\n",
+    );
+    await initGitRepo(root);
+    await commitAll(root, "baseline");
 
     await addService("billing-api", root);
     await Deno.writeTextFile(
@@ -769,7 +839,7 @@ Deno.test("verify rejects custom services importing platform DB internals", asyn
     );
 
     await assertRejects(
-      () => verifyProject(root),
+      () => gateProject(root, () => Promise.resolve()),
       Error,
       "must not import platform DB internals",
     );
@@ -778,16 +848,13 @@ Deno.test("verify rejects custom services importing platform DB internals", asyn
   }
 });
 
-Deno.test("verify enforces required deno tasks", async () => {
+Deno.test("verify enforces required test tasks", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-verify-fixture-" });
   const root = new URL(`file://${rootPath}/`);
 
   try {
     await writeProjectConfig(root, "deno.jsonc", {
-      build: "echo build",
-      start: "echo start",
-      dev: "echo dev",
-      check: "echo check",
+      "test:e2e": "echo e2e",
     });
 
     await addSurface("site", root);
@@ -795,11 +862,274 @@ Deno.test("verify enforces required deno tasks", async () => {
     await assertRejects(
       () => verifyProject(root),
       Error,
-      'Missing required deno.json or deno.jsonc task "test".',
+      'Missing required deno.json or deno.jsonc task "test:unit".',
     );
   } finally {
     await Deno.remove(root, { recursive: true });
   }
+});
+
+Deno.test("verify runs test tasks in test-only order", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-verify-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+  const invocations: string[] = [];
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      "test:unit": "echo test",
+      "test:bruno": "echo bruno",
+      "test:ai": "echo ai",
+      "test:e2e": "echo e2e",
+    });
+
+    await verifyProject(root, ({ command }) => {
+      invocations.push(command);
+      return Promise.resolve();
+    });
+
+    assertEquals(invocations, ["test:unit", "test:bruno", "test:ai", "test:e2e"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("verify prints a summary at the end", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-verify-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      "test:unit": "echo test",
+      "test:bruno": "echo bruno",
+      "test:e2e": "echo e2e",
+    });
+
+    const messages = await captureConsoleLog(() =>
+      verifyProject(root, ({ command }) => {
+        switch (command) {
+          case "test:unit":
+            return Promise.resolve({ code: 0, metrics: { passed: 7, total: 7 } });
+          case "test:bruno":
+            return Promise.resolve({ code: 0, metrics: { passed: 2, total: 2 } });
+          case "test:e2e":
+            return Promise.resolve({ code: 0, metrics: { passed: 3, total: 3 } });
+          default:
+            return Promise.resolve();
+        }
+      })
+    );
+
+    const output = messages.join("\n");
+    assertStringIncludes(output, "Verify summary");
+    assertStringIncludes(output, "✓ Unit tests: 7 of 7 passed");
+    assertStringIncludes(output, "✓ Bruno: 2 of 2 passed");
+    assertStringIncludes(output, "✓ Playwright browser: 3 of 3 passed");
+    assertStringIncludes(output, "Overall: PASSED (4 passed, 0 failed)");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gate requires a changed completed exec plan", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-gate-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+  const invocations: string[] = [];
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      lint: "echo lint",
+      build: "echo build",
+      start: "echo start",
+      dev: "echo dev",
+      check: "echo check",
+      "test:unit": "echo test",
+      "test:coverage": "echo coverage",
+      "test:e2e": "echo e2e",
+    });
+    await Deno.writeTextFile(new URL("AGENTS.md", root), "# AGENTS\n");
+    await Deno.mkdir(new URL("agent-docs/exec-plans/active/", root), { recursive: true });
+    await Deno.mkdir(new URL("agent-docs/exec-plans/completed/", root), { recursive: true });
+    await Deno.writeTextFile(new URL("src.ts", root), "export const value = 1;\n");
+    await initGitRepo(root);
+    await commitAll(root, "baseline");
+    await Deno.writeTextFile(new URL("src.ts", root), "export const value = 2;\n");
+
+    await assertRejects(
+      () =>
+        gateProject(root, ({ label }) => {
+          invocations.push(label);
+          return Promise.resolve();
+        }),
+      Error,
+      "changed exec-plan marked Completed",
+    );
+
+    assertEquals(invocations, ["format check", "lint"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gate prints a summary when a step fails", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-gate-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      lint: "echo lint",
+    });
+    await Deno.writeTextFile(new URL("AGENTS.md", root), "# AGENTS\n");
+    await Deno.mkdir(new URL("agent-docs/exec-plans/active/", root), { recursive: true });
+    await Deno.mkdir(new URL("agent-docs/exec-plans/completed/", root), { recursive: true });
+
+    const messages = await captureConsoleLog(async () => {
+      await assertRejects(
+        () =>
+          gateProject(root, ({ label }) => {
+            if (label === "lint") {
+              return Promise.reject(new Error("lint failed"));
+            }
+            return Promise.resolve();
+          }),
+        Error,
+        "lint failed",
+      );
+    });
+
+    const output = messages.join("\n");
+    assertStringIncludes(output, "Gate summary");
+    assertStringIncludes(output, "✓ Project structure: 1 of 1 passed");
+    assertStringIncludes(output, "✓ Required tasks: 1 of 1 passed");
+    assertStringIncludes(output, "✓ Format check: 1 of 1 passed");
+    assertStringIncludes(output, "✗ Lint: 0 of 1 passed");
+    assertStringIncludes(output, "✓ Exec plan completion: 1 of 1 passed");
+    assertStringIncludes(output, "Overall: FAILED (4 passed, 1 failed)");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("gate accepts a changed completed exec plan file", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-gate-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+  const invocations: string[] = [];
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      lint: "echo lint",
+      build: "echo build",
+      start: "echo start",
+      dev: "echo dev",
+      check: "echo check",
+      "test:unit": "echo test",
+      "test:coverage": "echo coverage",
+      "test:e2e": "echo e2e",
+    });
+    await Deno.writeTextFile(new URL("AGENTS.md", root), "# AGENTS\n");
+    await Deno.mkdir(new URL("agent-docs/exec-plans/active/", root), { recursive: true });
+    await Deno.mkdir(new URL("agent-docs/exec-plans/completed/", root), { recursive: true });
+    await Deno.writeTextFile(new URL("src.ts", root), "export const value = 1;\n");
+    await initGitRepo(root);
+    await commitAll(root, "baseline");
+    await Deno.writeTextFile(
+      new URL("agent-docs/exec-plans/completed/0001-gate.md", root),
+      "# Gate\n\n## Status\n\nCompleted.\n",
+    );
+
+    await gateProject(root, ({ label }) => {
+      invocations.push(label);
+      return Promise.resolve();
+    });
+
+    assertEquals(invocations, ["format check", "lint"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("audit runs deno dependency audit when deno.lock is present", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-audit-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+  const invocations: string[] = [];
+
+  try {
+    await Deno.writeTextFile(new URL("deno.lock", root), '{\n  "version": "5"\n}\n');
+    await initGitRepo(root);
+    await commitAll(root, "baseline");
+
+    await auditProject(root, ({ label }) => {
+      invocations.push(label);
+      return Promise.resolve();
+    });
+
+    assertEquals(invocations, ["dependency audit"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("audit prints a summary when a step fails", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-audit-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+
+  try {
+    await Deno.writeTextFile(
+      new URL("secrets.txt", root),
+      "token=ghp_123456789012345678901234567890123456\n",
+    );
+    await Deno.writeTextFile(new URL("deno.lock", root), '{\n  "version": "5"\n}\n');
+    await initGitRepo(root);
+    await commitAll(root, "baseline");
+    await Deno.writeTextFile(
+      new URL("secrets.txt", root),
+      "token=ghp_123456789012345678901234567890123456\nchanged=true\n",
+    );
+
+    const messages = await captureConsoleLog(async () => {
+      await assertRejects(
+        () =>
+          auditProject(root, ({ label }) => {
+            if (label === "dependency audit") {
+              return Promise.reject(new Error("dependency audit failed"));
+            }
+            return Promise.resolve();
+          }),
+        Error,
+        "Audit failed",
+      );
+    });
+
+    const output = messages.join("\n");
+    assertStringIncludes(output, "Audit summary");
+    assertStringIncludes(output, "✗ Secret scan: 0 of 1 passed");
+    assertStringIncludes(output, "✗ Dependency audit: 0 of 1 passed");
+    assertStringIncludes(output, "Overall: FAILED (0 passed, 2 failed)");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("secret scan flags obvious credential material in changed files", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-audit-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+
+  try {
+    await Deno.writeTextFile(
+      new URL("secrets.txt", root),
+      "token=ghp_123456789012345678901234567890123456\n",
+    );
+    const issues = await findSecretScanIssues(root, ["secrets.txt"]);
+    assertEquals(issues, ["secrets.txt: matched GitHub token"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("extractPlanStatus reads completed plan status blocks", () => {
+  assertEquals(
+    extractPlanStatus("# Example\n\n## Status\n\nCompleted.\n"),
+    "Completed",
+  );
 });
 
 Deno.test("usage for invalid add command stays explicit", async () => {
@@ -820,7 +1150,7 @@ Deno.test("registry exports include service order once added", async () => {
       start: "echo start",
       dev: "echo dev",
       check: "echo check",
-      test: "echo test",
+      "test:unit": "echo test",
       "test:coverage": "echo coverage",
       "test:e2e": "echo e2e",
     });
