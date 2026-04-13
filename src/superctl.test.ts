@@ -12,7 +12,7 @@ import { extractPlanStatus, gateProject } from "./gate.ts";
 import { main } from "../main.ts";
 import { buildProject, devProject, startProject } from "./run.ts";
 import { addService, addSurface, initProject } from "./scaffold.ts";
-import { verifyProject } from "./verify.ts";
+import { testProject } from "./verify.ts";
 import { SUPERCTL_VERSION } from "./version.ts";
 
 async function captureConsoleLog(run: () => Promise<void>): Promise<string[]> {
@@ -75,10 +75,10 @@ async function writeQualityWorkflow(root: URL, source?: string): Promise<void> {
         "    steps:",
         "      - run: deno run -A .github/tools/superctl/main.ts gate",
         "",
-        "  verify:",
+        "  test:",
         "    runs-on: ubuntu-latest",
         "    steps:",
-        "      - run: deno run -A .github/tools/superctl/main.ts verify",
+        "      - run: deno run -A .github/tools/superctl/main.ts test",
         "",
         "  audit:",
         "    runs-on: ubuntu-latest",
@@ -231,11 +231,11 @@ Deno.test("version commands print the current superctl version", async () => {
   }
 });
 
-Deno.test("help lists audit alongside gate and verify", async () => {
+Deno.test("help lists audit alongside gate and test", async () => {
   const messages = await captureConsoleLog(() => main(["help"]));
   const output = messages.join("\n");
   assertStringIncludes(output, "superctl gate");
-  assertStringIncludes(output, "superctl verify");
+  assertStringIncludes(output, "superctl test");
   assertStringIncludes(output, "superctl audit");
 });
 
@@ -308,7 +308,7 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     assertStringIncludes(qualityWorkflow, "pull_request");
     assertStringIncludes(qualityWorkflow, "Superctl Gate");
     assertStringIncludes(qualityWorkflow, "main.ts gate");
-    assertStringIncludes(qualityWorkflow, "main.ts verify");
+    assertStringIncludes(qualityWorkflow, "main.ts test");
     assertStringIncludes(qualityWorkflow, "main.ts audit");
   } finally {
     await fixture.cleanup();
@@ -855,8 +855,8 @@ Deno.test("gate rejects custom services importing platform DB internals", async 
   }
 });
 
-Deno.test("verify enforces required test tasks", async () => {
-  const rootPath = await Deno.makeTempDir({ prefix: "superctl-verify-fixture-" });
+Deno.test("test command enforces required test tasks", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-test-fixture-" });
   const root = new URL(`file://${rootPath}/`);
 
   try {
@@ -867,7 +867,7 @@ Deno.test("verify enforces required test tasks", async () => {
     await addSurface("site", root);
 
     await assertRejects(
-      () => verifyProject(root),
+      () => testProject(root),
       Error,
       'Missing required deno.json or deno.jsonc task "test:unit".',
     );
@@ -876,8 +876,8 @@ Deno.test("verify enforces required test tasks", async () => {
   }
 });
 
-Deno.test("verify runs test tasks in test-only order", async () => {
-  const rootPath = await Deno.makeTempDir({ prefix: "superctl-verify-fixture-" });
+Deno.test("test command runs test tasks in test-only order", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-test-fixture-" });
   const root = new URL(`file://${rootPath}/`);
   const invocations: string[] = [];
 
@@ -889,7 +889,7 @@ Deno.test("verify runs test tasks in test-only order", async () => {
       "test:e2e": "echo e2e",
     });
 
-    await verifyProject(root, ({ command }) => {
+    await testProject(root, ({ command }) => {
       invocations.push(command);
       return Promise.resolve();
     });
@@ -900,8 +900,8 @@ Deno.test("verify runs test tasks in test-only order", async () => {
   }
 });
 
-Deno.test("verify prints a summary at the end", async () => {
-  const rootPath = await Deno.makeTempDir({ prefix: "superctl-verify-fixture-" });
+Deno.test("test command prints a summary at the end", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-test-fixture-" });
   const root = new URL(`file://${rootPath}/`);
 
   try {
@@ -912,7 +912,7 @@ Deno.test("verify prints a summary at the end", async () => {
     });
 
     const messages = await captureConsoleLog(() =>
-      verifyProject(root, ({ command }) => {
+      testProject(root, ({ command }) => {
         switch (command) {
           case "test:unit":
             return Promise.resolve({ code: 0, metrics: { passed: 7, total: 7 } });
@@ -927,7 +927,7 @@ Deno.test("verify prints a summary at the end", async () => {
     );
 
     const output = messages.join("\n");
-    assertStringIncludes(output, "Verify summary");
+    assertStringIncludes(output, "Test summary");
     assertStringIncludes(output, "✓ Unit tests: 7 of 7 passed");
     assertStringIncludes(output, "✓ Bruno: 2 of 2 passed");
     assertStringIncludes(output, "✓ Playwright browser: 3 of 3 passed");

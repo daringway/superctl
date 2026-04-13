@@ -10,7 +10,7 @@ Align `superctl` with the shared testing contract by:
 
 - keeping repo-root `tests/` only for smoke, e2e, fixtures, harnesses, and other non-unit suites
 - moving unit tests next to `src/` ownership
-- enforcing the layout through `gate` and `doctor`, not `verify`
+- enforcing the layout through `gate` and `doctor`, not `test`
 
 ## Implementation Checklist
 

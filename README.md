@@ -16,22 +16,22 @@ superctl start
 superctl dev
 superctl audit
 superctl gate
-superctl verify
+superctl test
 superctl doctor
 ```
 
-`doctor` checks project configuration without running the full verification pipeline. `init`
-bootstraps the current directory with a runnable Superstructure starter: `deno.json`, runtime
-scripts, a smoke test under `tests/smoke/`, a GitHub Actions quality workflow, generated registries,
-and a default HTML `site` surface so `superctl start` can serve a welcome page immediately.
+`doctor` checks project configuration without running the full test pipeline. `init` bootstraps the
+current directory with a runnable Superstructure starter: `deno.json`, runtime scripts, a smoke test
+under `tests/smoke/`, a GitHub Actions quality workflow, generated registries, and a default HTML
+`site` surface so `superctl start` can serve a welcome page immediately.
 
 `superctl gate` is the PR-quality and policy command. It runs format and lint checks, validates the
 project structure contract, enforces the repo-root `tests/` layout policy, and enforces the
-completed exec-plan rule. `superctl verify` is test-only. It requires `test:unit` plus `test:e2e`,
-and also runs optional `test:bruno` and `test:ai` tasks when the project defines them.
-`superctl
-audit` is security-only. It runs secret scanning and dependency vulnerability checks as a
-separate, more expensive PR check.
+completed exec-plan rule. `superctl test` is test-only. It requires `test:unit` plus `test:e2e`, and
+also runs optional `test:bruno` and `test:ai` tasks when the project defines them. `superctl
+audit`
+is security-only. It runs secret scanning and dependency vulnerability checks as a separate, more
+expensive PR check.
 
 ## Install
 
@@ -61,7 +61,7 @@ deno task check
 
 - project initialization
 - project scaffolding
-- project gate, verification, and audit
+- project gate, test, and audit
 - wrapper commands that delegate to repo-local `deno task build/start/dev`
 - future project init, upgrades, and AUTOPILOT connection flows
 

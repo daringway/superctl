@@ -29,7 +29,7 @@ Deno.test("cli smoke help prints usage", async () => {
 
   assertEquals(result.code, 0);
   assertStringIncludes(result.stdout, "Usage:");
-  assertStringIncludes(result.stdout, "superctl verify");
+  assertStringIncludes(result.stdout, "superctl test");
   assertEquals(result.stderr, "");
 });
 

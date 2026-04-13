@@ -25,7 +25,7 @@ export type VerifyCommandRunner = (
   invocation: CommandInvocation,
 ) => Promise<void | CommandRunResult>;
 
-export async function verifyProject(
+export async function testProject(
   root: URL = cwdRootUrl(),
   runCommandFn: VerifyCommandRunner = defaultRunCommand,
 ): Promise<void> {
@@ -61,12 +61,14 @@ export async function verifyProject(
     if (steps[0].status === "not-run") {
       markStepFailed(steps[0], error instanceof Error ? error.message : String(error));
     }
-    printCommandSummary("Verify", steps);
+    printCommandSummary("Test", steps);
     throw error;
   }
 
-  printCommandSummary("Verify", steps);
+  printCommandSummary("Test", steps);
 }
+
+export const verifyProject = testProject;
 
 async function defaultRunCommand(invocation: CommandInvocation): Promise<CommandRunResult> {
   const output = await new Deno.Command("deno", {
@@ -85,7 +87,7 @@ async function defaultRunCommand(invocation: CommandInvocation): Promise<Command
   const result = { code: output.code, metrics };
   if (output.code !== 0) {
     throw new CommandStepError(
-      `Verification failed while running "deno task ${invocation.command}".`,
+      `Test command failed while running "deno task ${invocation.command}".`,
       result,
     );
   }

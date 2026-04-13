@@ -7,4 +7,4 @@ Completed.
 ## Summary
 
 Adopt `agent-docs/` as the canonical local guidance folder for `superctl`, add exec-plan tracking,
-and split `gate` from `verify` so PR-policy checks and test execution are independent.
+and split `gate` from `test` so PR-policy checks and test execution are independent.
