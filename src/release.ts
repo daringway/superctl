@@ -35,6 +35,10 @@ export interface ReleaseBumpResult {
   tag: string;
 }
 
+export function formatReleaseTag(version: string): string {
+  return `v${version}`;
+}
+
 export async function bumpReleaseVersion(
   root: URL,
   kind: ReleaseBumpKind,
@@ -50,13 +54,13 @@ export async function bumpReleaseVersion(
 
   const resolvedDependencies = { ...defaultReleaseDependencies, ...dependencies };
   if (options.createTag ?? false) {
-    await resolvedDependencies.createGitTag(root, nextVersion);
+    await resolvedDependencies.createGitTag(root, formatReleaseTag(nextVersion));
   }
 
   return {
     previousVersion: currentVersion,
     nextVersion,
-    tag: nextVersion,
+    tag: formatReleaseTag(nextVersion),
   };
 }
 

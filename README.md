@@ -38,7 +38,7 @@ expensive PR check.
 Install from GitHub Releases with `mise`:
 
 ```bash
-mise use -g github:daringway/superctl@0.1.2
+mise use -g github:daringway/superctl@v0.1.2
 mise install
 ```
 
@@ -74,9 +74,12 @@ deno task release:bump -- bump minor --rc
 deno task release:bump -- bump patch --tag
 ```
 
-Release candidates use `-rc#` tags such as `0.1.3-rc1`. Re-running the same bump with `--rc`
-increments the candidate number. Running the matching stable bump promotes the current release
-candidate to its final tag, for example `0.1.3-rc2` -> `0.1.3`.
+Release candidates use `v`-prefixed `-rc#` tags such as `v0.1.3-rc1`. Re-running the same bump with
+`--rc` increments the candidate number. Running the matching stable bump promotes the current
+release candidate to its final tag, for example `v0.1.3-rc2` -> `v0.1.3`.
+
+Git release tags are canonical `v`-prefixed versions derived from `deno.json`, for example `v0.1.2`
+and `v0.1.3-rc1`.
 
 ## Scope
 

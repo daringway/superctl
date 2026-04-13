@@ -8,6 +8,42 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  release-version:
+    name: Release Version Available
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch remote tags
+        run: git fetch --force --tags origin
+
+      - name: Verify deno.json version has not been tagged
+        run: |
+          version="$(node -p "require('./deno.json').version")"
+          if [ -z "${version}" ]; then
+            echo "::error::deno.json must define a non-empty version string."
+            exit 1
+          fi
+
+          canonical_tag="v${version}"
+          legacy_tag="${version}"
+
+          if git rev-parse -q --verify "refs/tags/${canonical_tag}" >/dev/null; then
+            echo "::error::deno.json version ${version} already has release tag ${canonical_tag}. Bump deno.json version before merging."
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${legacy_tag}" >/dev/null; then
+            echo "::error::deno.json version ${version} already has legacy release tag ${legacy_tag}. Bump deno.json version before merging."
+            exit 1
+          fi
+
+          echo "Version ${version} is available for release tagging."
+
   standards:
     name: Quality Standards
     runs-on: ubuntu-latest

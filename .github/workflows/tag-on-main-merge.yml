@@ -1,0 +1,59 @@
+name: Tag Main Merge
+
+on:
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Create Release Tag
+    if: >
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout merged commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+
+      - name: Fetch remote tags
+        run: git fetch --force --tags origin
+
+      - name: Create and push release tag
+        run: |
+          version="$(node -p "require('./deno.json').version")"
+          if [ -z "${version}" ]; then
+            echo "::error::deno.json must define a non-empty version string."
+            exit 1
+          fi
+
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::Release tag ${tag} already exists. Bump deno.json version before merging to main."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "Release ${tag}"
+
+          if git push origin "refs/tags/${tag}"; then
+            echo "Created release tag ${tag}."
+            exit 0
+          fi
+
+          git fetch --force --tags origin
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::Release tag ${tag} was created concurrently while processing merged pull request #${{ github.event.pull_request.number }}."
+            exit 1
+          fi
+
+          echo "::error::Failed to push release tag ${tag}."
+          exit 1

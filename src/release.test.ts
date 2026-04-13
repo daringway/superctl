@@ -1,6 +1,6 @@
 import { assertEquals, assertThrows } from "@std/assert";
 
-import { bumpReleaseVersion, bumpVersion, parseVersion } from "./release.ts";
+import { bumpReleaseVersion, bumpVersion, formatReleaseTag, parseVersion } from "./release.ts";
 
 Deno.test("parseVersion accepts stable and release candidate versions", () => {
   assertEquals(parseVersion("0.1.2"), {
@@ -44,6 +44,11 @@ Deno.test("bumpVersion promotes matching release candidates to stable versions",
   assertEquals(bumpVersion("1.0.0-rc2", "major"), "1.0.0");
 });
 
+Deno.test("formatReleaseTag prefixes versions with v", () => {
+  assertEquals(formatReleaseTag("0.1.3"), "v0.1.3");
+  assertEquals(formatReleaseTag("0.1.3-rc1"), "v0.1.3-rc1");
+});
+
 Deno.test("bumpReleaseVersion updates deno.json and returns the matching tag", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-release-fixture-" });
   const root = new URL(`file://${rootPath}/`);
@@ -62,7 +67,7 @@ Deno.test("bumpReleaseVersion updates deno.json and returns the matching tag", a
     assertEquals(result, {
       previousVersion: "0.1.2",
       nextVersion: "0.2.0-rc1",
-      tag: "0.2.0-rc1",
+      tag: "v0.2.0-rc1",
     });
     assertEquals(updatedConfig.version, "0.2.0-rc1");
   } finally {
@@ -93,8 +98,8 @@ Deno.test("bumpReleaseVersion can create a matching git tag through its dependen
       },
     );
 
-    assertEquals(result.tag, "0.1.3");
-    assertEquals(tags, [{ path: root.pathname, tag: "0.1.3" }]);
+    assertEquals(result.tag, "v0.1.3");
+    assertEquals(tags, [{ path: root.pathname, tag: "v0.1.3" }]);
   } finally {
     await Deno.remove(rootPath, { recursive: true });
   }
