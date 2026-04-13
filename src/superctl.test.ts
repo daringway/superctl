@@ -126,34 +126,41 @@ async function commitAll(root: URL, message: string): Promise<void> {
   await runGit(root, ["commit", "-m", message]);
 }
 
-async function writeMiseTools(root: URL, toolEntries: Record<string, string>): Promise<void> {
+async function writeMiseTools(
+  root: URL,
+  toolEntries: Record<string, string>,
+  fileName = ".mise.toml",
+): Promise<void> {
   const lines = ["[tools]"];
   for (const [name, version] of Object.entries(toolEntries)) {
     lines.push(`${name} = "${version}"`);
   }
   lines.push("");
-  await Deno.writeTextFile(new URL(".mise.toml", root), lines.join("\n"));
+  await Deno.writeTextFile(new URL(fileName, root), lines.join("\n"));
 }
 
-async function writeLocalSuperctlPlugin(root: URL): Promise<void> {
-  await Deno.mkdir(new URL(".mise-plugins/superctl/bin/", root), { recursive: true });
-  await Deno.writeTextFile(
-    new URL(".mise-plugins/superctl/bin/install", root),
-    "#!/usr/bin/env bash\n",
-  );
-  await Deno.writeTextFile(
-    new URL(".mise-plugins/superctl/bin/list-all", root),
-    "#!/usr/bin/env bash\necho local\n",
-  );
+async function writeCanonicalSuperctlPlugin(rootPath: string): Promise<void> {
+  const pluginRoot = join(rootPath, "mise-plugin");
+  await Deno.mkdir(join(pluginRoot, "hooks"), { recursive: true });
+  await Deno.writeTextFile(join(pluginRoot, "metadata.lua"), "PLUGIN = { name = 'superctl' }\n");
+  await Deno.writeTextFile(join(pluginRoot, "hooks", "available.lua"), "return {}\n");
+  await Deno.writeTextFile(join(pluginRoot, "hooks", "pre_install.lua"), "return {}\n");
+  await Deno.writeTextFile(join(pluginRoot, "hooks", "post_install.lua"), "return {}\n");
+  await Deno.writeTextFile(join(pluginRoot, "hooks", "env_keys.lua"), "return {}\n");
 }
 
 async function writeFakeSuperctlSourceRepo(
   path: string,
   version = SUPERCTL_VERSION,
+  options: { includePlugin?: boolean } = {},
 ): Promise<void> {
   await Deno.mkdir(path, { recursive: true });
   await Deno.writeTextFile(join(path, "main.ts"), "console.log('superctl');\n");
   await Deno.writeTextFile(join(path, "deno.json"), JSON.stringify({ version }, null, 2) + "\n");
+
+  if (options.includePlugin ?? true) {
+    await writeCanonicalSuperctlPlugin(path);
+  }
 }
 
 function makeFakeGitHubToken(): string {
@@ -499,9 +506,13 @@ Deno.test("doctor validates healthy local superctl mode", async () => {
     await writeMiseTools(fixture.root, {
       deno: "2.7.10",
       node: "25.4.0",
-      superctl: "local",
+      superctl: "main",
     });
-    await writeLocalSuperctlPlugin(fixture.root);
+    await writeMiseTools(
+      fixture.root,
+      { superctl: "local" },
+      "mise.local.toml",
+    );
     await writeFakeSuperctlSourceRepo(join(fixture.workspacePath, "repos", "superctl"));
 
     const messages = await withEnv(
@@ -523,9 +534,20 @@ Deno.test("doctor reports missing local superctl plugin files", async () => {
     await writeMiseTools(fixture.root, {
       deno: "2.7.10",
       node: "25.4.0",
-      superctl: "local",
+      superctl: "main",
     });
-    await writeFakeSuperctlSourceRepo(join(fixture.workspacePath, "repos", "superctl"));
+    await writeMiseTools(
+      fixture.root,
+      { superctl: "local" },
+      "mise.local.toml",
+    );
+    await writeFakeSuperctlSourceRepo(
+      join(fixture.workspacePath, "repos", "superctl"),
+      SUPERCTL_VERSION,
+      {
+        includePlugin: false,
+      },
+    );
 
     const messages = await withEnv(
       "SUPERCTL_ROOT",
@@ -535,11 +557,11 @@ Deno.test("doctor reports missing local superctl plugin files", async () => {
     const output = messages.join("\n");
     assertStringIncludes(
       output,
-      'Local superctl mode requires ".mise-plugins/superctl/bin/install".',
+      "mise-plugin/metadata.lua",
     );
     assertStringIncludes(
       output,
-      'Local superctl mode requires ".mise-plugins/superctl/bin/list-all".',
+      "mise-plugin/hooks/pre_install.lua",
     );
   } finally {
     await fixture.cleanup();
@@ -554,9 +576,13 @@ Deno.test("doctor reports missing local superctl source repos", async () => {
     await writeMiseTools(fixture.root, {
       deno: "2.7.10",
       node: "25.4.0",
-      superctl: "local",
+      superctl: "main",
     });
-    await writeLocalSuperctlPlugin(fixture.root);
+    await writeMiseTools(
+      fixture.root,
+      { superctl: "local" },
+      "mise.local.toml",
+    );
 
     const messages = await withEnv(
       "SUPERCTL_ROOT",
@@ -580,9 +606,13 @@ Deno.test("doctor reports stale local superctl binaries", async () => {
     await writeMiseTools(fixture.root, {
       deno: "2.7.10",
       node: "25.4.0",
-      superctl: "local",
+      superctl: "main",
     });
-    await writeLocalSuperctlPlugin(fixture.root);
+    await writeMiseTools(
+      fixture.root,
+      { superctl: "local" },
+      "mise.local.toml",
+    );
     await writeFakeSuperctlSourceRepo(join(fixture.workspacePath, "repos", "superctl"), "9.9.9");
 
     const messages = await withEnv(

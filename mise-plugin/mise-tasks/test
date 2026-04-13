@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Run plugin tests - install superctl from main and local source"
+set -euo pipefail
+
+plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "${plugin_root}/.." && pwd)"
+
+mise plugin link --force superctl "${plugin_root}"
+mise cache clear
+mise install -f superctl@main
+mise exec "superctl@main" -- superctl help >/dev/null
+
+SUPERCTL_ROOT="${repo_root}" mise install -f superctl@local
+SUPERCTL_ROOT="${repo_root}" mise exec "superctl@local" -- superctl help >/dev/null
+
+echo "superctl plugin checks passed"

@@ -25,11 +25,20 @@ const STARTER_PLATFORM_ROOT_FILES = [
   "tests/smoke/runtime_smoke_test.ts",
 ] as const;
 const LOCAL_SUPERCTL_PLUGIN_FILES = [
-  ".mise-plugins/superctl/bin/install",
-  ".mise-plugins/superctl/bin/list-all",
+  "mise-plugin/metadata.lua",
+  "mise-plugin/hooks/available.lua",
+  "mise-plugin/hooks/pre_install.lua",
+  "mise-plugin/hooks/post_install.lua",
+  "mise-plugin/hooks/env_keys.lua",
 ] as const;
 const EXPECTED_PLATFORM_RUNTIME_ENTRYPOINT = "packages/runtime/src/index.ts";
 const LOCAL_SUPERCTL_DEFAULT_ROOT = "../../repos/superctl";
+const MISE_TOOL_CONFIG_FILES = [
+  "mise.local.toml",
+  ".mise.local.toml",
+  ".mise.toml",
+  "mise.toml",
+] as const;
 
 type DoctorSeverity = "error" | "warning" | "info";
 
@@ -258,15 +267,6 @@ async function inspectLocalSuperctlMode(root: URL, findings: DoctorFinding[]): P
     return;
   }
 
-  for (const relativePath of LOCAL_SUPERCTL_PLUGIN_FILES) {
-    if (!(await isFileAtProjectPath(root, relativePath))) {
-      findings.push({
-        severity: "error",
-        message: `Local superctl mode requires "${relativePath}".`,
-      });
-    }
-  }
-
   const sourceRoot = resolveLocalSuperctlRoot(root);
   const sourceEntrypoint = join(sourceRoot, "main.ts");
   const sourceConfigPath = join(sourceRoot, "deno.json");
@@ -278,6 +278,16 @@ async function inspectLocalSuperctlMode(root: URL, findings: DoctorFinding[]): P
         `Local superctl mode requires a source repo at "${sourceRoot}" with "main.ts" and "deno.json".`,
     });
     return;
+  }
+
+  for (const relativePath of LOCAL_SUPERCTL_PLUGIN_FILES) {
+    const pluginPath = join(sourceRoot, relativePath);
+    if (!(await isFilePath(pluginPath))) {
+      findings.push({
+        severity: "error",
+        message: `Local superctl mode requires canonical plugin file "${pluginPath}".`,
+      });
+    }
   }
 
   const sourceVersion = await loadSuperctlSourceVersion(sourceConfigPath);
@@ -332,26 +342,28 @@ function extractStarterPlatformRoot(source: string): string | null {
 }
 
 async function loadMiseToolVersion(root: URL, toolName: string): Promise<string | null> {
-  const source = await readTextFileIfExists(root, ".mise.toml");
-  if (!source) {
-    return null;
-  }
-
-  let inToolsSection = false;
-  for (const line of source.split(/\r?\n/u)) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-      inToolsSection = trimmed === "[tools]";
+  for (const configFile of MISE_TOOL_CONFIG_FILES) {
+    const source = await readTextFileIfExists(root, configFile);
+    if (!source) {
       continue;
     }
 
-    if (!inToolsSection || trimmed === "" || trimmed.startsWith("#")) {
-      continue;
-    }
+    let inToolsSection = false;
+    for (const line of source.split(/\r?\n/u)) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        inToolsSection = trimmed === "[tools]";
+        continue;
+      }
 
-    const assignment = trimmed.match(/^([A-Za-z0-9_.-]+)\s*=\s*["']([^"']+)["']\s*$/u);
-    if (assignment?.[1] === toolName) {
-      return assignment[2] ?? null;
+      if (!inToolsSection || trimmed === "" || trimmed.startsWith("#")) {
+        continue;
+      }
+
+      const assignment = trimmed.match(/^([A-Za-z0-9_.-]+)\s*=\s*["']([^"']+)["']\s*$/u);
+      if (assignment?.[1] === toolName) {
+        return assignment[2] ?? null;
+      }
     }
   }
 
@@ -390,10 +402,6 @@ async function readTextFileIfExists(root: URL, relativePath: string): Promise<st
     }
     throw error;
   }
-}
-
-async function isFileAtProjectPath(root: URL, relativePath: string): Promise<boolean> {
-  return await isFilePath(fileURLToPath(new URL(relativePath, root)));
 }
 
 async function isFilePath(path: string): Promise<boolean> {
