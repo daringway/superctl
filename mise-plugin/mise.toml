@@ -1,0 +1,14 @@
+[env]
+MISE_USE_VERSIONS_HOST = "0"
+
+[tools]
+lua = "5.4"
+stylua = "latest"
+
+[tasks.format]
+description = "Format Lua plugin sources"
+run = "stylua metadata.lua hooks/ lib/"
+
+[tasks.test]
+description = "Run the superctl plugin install checks"
+run = "./mise-tasks/test"

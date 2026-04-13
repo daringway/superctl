@@ -32,6 +32,10 @@
     "compile": {
       "description": "Compile the superctl binary to dist/superctl",
       "command": "deno compile -A --output dist/superctl main.ts"
+    },
+    "release:bump": {
+      "description": "Bump deno.json version for a stable or release-candidate superctl release",
+      "command": "deno run -A scripts/release.ts"
     }
   },
   "exclude": [

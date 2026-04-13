@@ -42,10 +42,18 @@ mise use -g github:daringway/superctl@0.1.2
 mise install
 ```
 
-For local sibling-repo development before a release exists:
+Within the `autopilot-ai-dev` workspace, apps should link the canonical plugin under
+`repos/superctl/mise-plugin` and keep their committed `.mise.toml` on `superctl = "main"`:
 
 ```bash
-deno run -A main.ts --help
+mise plugin link --force superctl /absolute/path/to/repos/superctl/mise-plugin
+mise install -f superctl@main
+```
+
+For opt-in local CLI development against a sibling `superctl` checkout:
+
+```bash
+SUPERCTL_ROOT=/absolute/path/to/repos/superctl mise install -f superctl@local
 ```
 
 ## Development
@@ -54,6 +62,21 @@ deno run -A main.ts --help
 mise install
 deno task check
 ```
+
+## Releases
+
+`deno.json` is the source of truth for the `superctl` version. Use the release bump script to update
+that version and emit the matching git tag name:
+
+```bash
+deno task release:bump -- bump patch
+deno task release:bump -- bump minor --rc
+deno task release:bump -- bump patch --tag
+```
+
+Release candidates use `-rc#` tags such as `0.1.3-rc1`. Re-running the same bump with `--rc`
+increments the candidate number. Running the matching stable bump promotes the current release
+candidate to its final tag, for example `0.1.3-rc2` -> `0.1.3`.
 
 ## Scope
 
