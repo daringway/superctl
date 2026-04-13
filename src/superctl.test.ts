@@ -70,6 +70,12 @@ async function writeQualityWorkflow(root: URL, source?: string): Promise<void> {
         "  workflow_dispatch:",
         "",
         "jobs:",
+        "  standards:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: deno fmt --check .",
+        "      - run: deno lint --config deno.json .",
+        "",
         "  gate:",
         "    runs-on: ubuntu-latest",
         "    steps:",
@@ -306,9 +312,13 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     await Deno.stat(new URL("agent-docs/exec-plans/active/.gitkeep", fixture.root));
     await Deno.stat(new URL("agent-docs/exec-plans/completed/.gitkeep", fixture.root));
     assertStringIncludes(qualityWorkflow, "pull_request");
+    assertStringIncludes(qualityWorkflow, "Quality Standards");
+    assertStringIncludes(qualityWorkflow, "deno fmt --check .");
+    assertStringIncludes(qualityWorkflow, "deno lint --config deno.json .");
     assertStringIncludes(qualityWorkflow, "Superctl Gate");
     assertStringIncludes(qualityWorkflow, "main.ts gate");
     assertStringIncludes(qualityWorkflow, "main.ts test");
+    assertStringIncludes(qualityWorkflow, "deno audit --level=high");
     assertStringIncludes(qualityWorkflow, "main.ts audit");
   } finally {
     await fixture.cleanup();
