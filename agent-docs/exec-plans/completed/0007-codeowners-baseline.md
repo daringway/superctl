@@ -14,10 +14,14 @@ and policy flows.
 1. Add repository ownership metadata
    - [x] add `.github/CODEOWNERS`
    - [x] assign the repository to `@daringway/autopilot`
-2. Validation
+2. Keep the PR mergeable under release policy
+   - [x] bump `deno.json` from `0.1.2` to `0.1.3` so the PR does not reuse existing tag `v0.1.2`
+3. Validation
    - [x] `deno run -A main.ts gate`
 
 ## Progress Notes
 
 - 2026-04-13: added a baseline `.github/CODEOWNERS` file that assigns repository ownership to
   `@daringway/autopilot`.
+- 2026-04-13: bumped `deno.json` to `0.1.3` so the PR passes the release-version availability check
+  after `v0.1.2` was already tagged.
