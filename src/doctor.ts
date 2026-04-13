@@ -9,11 +9,12 @@ import {
   loadDenoProjectTasks,
 } from "./deno_config.ts";
 import { cwdRootUrl } from "./paths.ts";
+import { listTestLayoutIssues } from "./project_checks.ts";
 import { loadProjectManifest, ProjectManifest } from "./project.ts";
 import { SUPERCTL_VERSION } from "./version.ts";
 
 const REQUIRED_DENO_TASKS = ["build", "start", "dev", "check"] as const;
-const REQUIRED_TEST_TASKS = ["test", "test:coverage", "test:e2e"] as const;
+const REQUIRED_TEST_TASKS = ["test:unit", "test:coverage", "test:e2e"] as const;
 const QUALITY_WORKFLOW_FILES = [
   ".github/workflows/quality.yml",
   ".github/workflows/quality.yaml",
@@ -21,7 +22,7 @@ const QUALITY_WORKFLOW_FILES = [
 const STARTER_PLATFORM_ROOT_FILES = [
   "scripts/start.ts",
   "scripts/dev.ts",
-  "tests/runtime_smoke_test.ts",
+  "tests/smoke/runtime_smoke_test.ts",
 ] as const;
 const LOCAL_SUPERCTL_PLUGIN_FILES = [
   ".mise-plugins/superctl/bin/install",
@@ -119,6 +120,7 @@ async function inspectProjectConfiguration(root: URL): Promise<DoctorFinding[]> 
   }
 
   await inspectQualityWorkflow(root, findings);
+  await inspectTestLayout(root, findings);
   await inspectLocalSuperctlMode(root, findings);
 
   const manifest = await loadManifestSafely(root, findings);
@@ -160,10 +162,24 @@ async function inspectQualityWorkflow(root: URL, findings: DoctorFinding[]): Pro
     });
   }
 
-  if (!source.includes("deno task check")) {
+  const runsGateAndTestAndAudit = source.includes("main.ts gate") &&
+    (source.includes("main.ts test") || source.includes("main.ts verify")) &&
+    source.includes("main.ts audit");
+  const runsLegacyCheck = source.includes("deno task check");
+  if (!runsGateAndTestAndAudit && !runsLegacyCheck) {
     findings.push({
       severity: "error",
-      message: `GitHub Actions quality workflow "${workflowFile}" must run "deno task check".`,
+      message:
+        `GitHub Actions quality workflow "${workflowFile}" must run "superctl gate", "superctl test", and "superctl audit" or the legacy "deno task check".`,
+    });
+  }
+}
+
+async function inspectTestLayout(root: URL, findings: DoctorFinding[]): Promise<void> {
+  for (const issue of await listTestLayoutIssues(root)) {
+    findings.push({
+      severity: "error",
+      message: issue,
     });
   }
 }

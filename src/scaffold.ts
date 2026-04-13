@@ -24,6 +24,7 @@ export async function initProject(root: URL = cwdRootUrl()): Promise<void> {
   const platformRoot = await resolveStarterPlatformRoot(root);
 
   await writeStarterDenoConfig(root, platformRoot);
+  await writeStarterAgentDocs(root);
   await writeStarterQualityWorkflow(root);
   await writeStarterScripts(root, projectName, platformRoot);
   await writeStarterTests(root, projectName, platformRoot);
@@ -344,6 +345,8 @@ async function addStarterSiteSurface(projectName: string, root: URL): Promise<vo
 }
 
 async function writeStarterDenoConfig(root: URL, platformRoot: string): Promise<void> {
+  const unitTestIgnore =
+    "tests/e2e,tests/smoke,tests/db,tests/bruno,tests/fixtures,tests/harness,node_modules,dist,coverage";
   await writeJsonFile(new URL("deno.json", root), {
     nodeModulesDir: "auto",
     imports: {
@@ -378,17 +381,66 @@ async function writeStarterDenoConfig(root: URL, platformRoot: string): Promise<
         "scripts/dev.ts",
         "superstructure/surfaces/site/index.ts",
         "superstructure/surfaces/site/surface.tsx",
-        "tests/runtime_smoke_test.ts",
+        "tests/smoke/runtime_smoke_test.ts",
       ].join(" "),
-      test: "deno test -A tests",
-      "test:coverage": "deno test -A --coverage=coverage tests",
-      "test:e2e": "deno test -A tests/runtime_smoke_test.ts",
-      check: "deno task lint && deno task typecheck && deno task test && deno task build",
+      "test:unit": `deno test -A . --ignore=${unitTestIgnore}`,
+      "test:coverage": `deno test -A --coverage=coverage . --ignore=${unitTestIgnore}`,
+      "test:e2e": "deno test -A tests/smoke/runtime_smoke_test.ts",
+      check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
     },
     fmt: {
       lineWidth: 100,
     },
   });
+}
+
+async function writeStarterAgentDocs(root: URL): Promise<void> {
+  await Deno.mkdir(new URL("agent-docs/exec-plans/active/", root), { recursive: true });
+  await Deno.mkdir(new URL("agent-docs/exec-plans/completed/", root), { recursive: true });
+  await Deno.writeTextFile(
+    new URL("AGENTS.md", root),
+    [
+      "# AGENTS.md",
+      "",
+      "## Purpose",
+      "",
+      "This repository is a downstream Superstructure project.",
+      "",
+      "Read this file first, then read the local `agent-docs/` guidance before making substantial",
+      "changes.",
+      "",
+      "## Read Order",
+      "",
+      "1. `README.md`",
+      "2. `agent-docs/README.md`",
+      "3. active exec plans in `agent-docs/exec-plans/active/`",
+      "",
+      "## Required Local Structure",
+      "",
+      "- `agent-docs/` is the canonical project-local guidance folder",
+      "- track substantial work in `agent-docs/exec-plans/active/` and move completed work to",
+      "  `agent-docs/exec-plans/completed/`",
+      "- use `superctl gate` for business/policy checks, `superctl test` for app tests, and",
+      "  `superctl audit` for security checks",
+      "",
+    ].join("\n"),
+  );
+  await Deno.writeTextFile(
+    new URL("agent-docs/README.md", root),
+    [
+      "# Agent Docs",
+      "",
+      "Project-local implementation guidance and execution-plan tracking live here.",
+      "",
+      "## Required Subdirectories",
+      "",
+      "- `exec-plans/active/` for proposed and in-flight work",
+      "- `exec-plans/completed/` for finished work",
+      "",
+    ].join("\n"),
+  );
+  await Deno.writeTextFile(new URL("agent-docs/exec-plans/active/.gitkeep", root), "");
+  await Deno.writeTextFile(new URL("agent-docs/exec-plans/completed/.gitkeep", root), "");
 }
 
 async function writeStarterQualityWorkflow(root: URL): Promise<void> {
@@ -406,12 +458,12 @@ async function writeStarterQualityWorkflow(root: URL): Promise<void> {
       '  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"',
       "",
       "jobs:",
-      "  check:",
-      "    name: Check",
+      "  standards:",
+      "    name: Quality Standards",
       "    runs-on: ubuntu-latest",
       "",
       "    steps:",
-      "      - name: Checkout",
+      "      - name: Checkout project",
       "        uses: actions/checkout@v6",
       "",
       "      - name: Setup mise toolchain",
@@ -421,8 +473,93 @@ async function writeStarterQualityWorkflow(root: URL): Promise<void> {
       "          install: true",
       "          cache: true",
       "",
-      "      - name: Run repo checks",
-      "        run: deno task check",
+      "      - name: Run deno fmt",
+      "        run: deno fmt --check .",
+      "",
+      "      - name: Run deno lint",
+      "        run: deno lint --config deno.json .",
+      "",
+      "  gate:",
+      "    name: Superctl Gate",
+      "    runs-on: ubuntu-latest",
+      "",
+      "    steps:",
+      "      - name: Checkout project",
+      "        uses: actions/checkout@v6",
+      "        with:",
+      "          fetch-depth: 0",
+      "",
+      "      - name: Checkout superctl",
+      "        uses: actions/checkout@v6",
+      "        with:",
+      "          repository: daringway/superctl",
+      "          ref: main",
+      "          path: .github/tools/superctl",
+      "",
+      "      - name: Setup mise toolchain",
+      "        uses: jdx/mise-action@v4",
+      "        with:",
+      "          version: 2026.3.10",
+      "          install: true",
+      "          cache: true",
+      "",
+      "      - name: Run superctl gate",
+      `        run: deno run -A .github/tools/superctl/main.ts gate`,
+      "",
+      "  test:",
+      "    name: Superctl Test",
+      "    runs-on: ubuntu-latest",
+      "",
+      "    steps:",
+      "      - name: Checkout project",
+      "        uses: actions/checkout@v6",
+      "",
+      "      - name: Checkout superctl",
+      "        uses: actions/checkout@v6",
+      "        with:",
+      "          repository: daringway/superctl",
+      "          ref: main",
+      "          path: .github/tools/superctl",
+      "",
+      "      - name: Setup mise toolchain",
+      "        uses: jdx/mise-action@v4",
+      "        with:",
+      "          version: 2026.3.10",
+      "          install: true",
+      "          cache: true",
+      "",
+      "      - name: Run superctl test",
+      "        run: deno run -A .github/tools/superctl/main.ts test",
+      "",
+      "  audit:",
+      "    name: Superctl Audit",
+      "    runs-on: ubuntu-latest",
+      "",
+      "    steps:",
+      "      - name: Checkout project",
+      "        uses: actions/checkout@v6",
+      "        with:",
+      "          fetch-depth: 0",
+      "",
+      "      - name: Checkout superctl",
+      "        uses: actions/checkout@v6",
+      "        with:",
+      "          repository: daringway/superctl",
+      "          ref: main",
+      "          path: .github/tools/superctl",
+      "",
+      "      - name: Setup mise toolchain",
+      "        uses: jdx/mise-action@v4",
+      "        with:",
+      "          version: 2026.3.10",
+      "          install: true",
+      "          cache: true",
+      "",
+      "      - name: Run deno audit",
+      "        run: deno audit --level=high",
+      "",
+      "      - name: Run superctl audit",
+      "        run: deno run -A .github/tools/superctl/main.ts audit",
       "",
     ].join("\n"),
   );
@@ -462,10 +599,10 @@ async function writeStarterTests(
   projectName: string,
   platformRoot: string,
 ): Promise<void> {
-  await Deno.mkdir(new URL("tests/", root), { recursive: true });
+  await Deno.mkdir(new URL("tests/smoke/", root), { recursive: true });
 
   await Deno.writeTextFile(
-    new URL("tests/runtime_smoke_test.ts", root),
+    new URL("tests/smoke/runtime_smoke_test.ts", root),
     [
       "import { createServerApp } from '@daringway/superstructure-runtime';",
       "",

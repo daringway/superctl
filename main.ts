@@ -1,9 +1,11 @@
+import { auditProject } from "./src/audit.ts";
 import { doctorProject } from "./src/doctor.ts";
+import { gateProject } from "./src/gate.ts";
 import { cwdRootUrl } from "./src/paths.ts";
 import { buildProject, devProject, startProject } from "./src/run.ts";
 import { addService, addSurface, initProject } from "./src/scaffold.ts";
+import { testProject } from "./src/verify.ts";
 import { SUPERCTL_VERSION } from "./src/version.ts";
-import { verifyProject } from "./src/verify.ts";
 
 function usage(): string {
   return [
@@ -16,7 +18,9 @@ function usage(): string {
     "  superctl build",
     "  superctl start",
     "  superctl dev",
-    "  superctl verify",
+    "  superctl audit",
+    "  superctl gate",
+    "  superctl test",
     "  superctl doctor",
   ].join("\n");
 }
@@ -77,11 +81,24 @@ export async function main(args: string[]): Promise<void> {
       }
       await devProject(root);
       return;
+    case "audit":
+      if (rest.length > 0) {
+        throw new Error(`Unexpected arguments for "${command}".\n\n${usage()}`);
+      }
+      await auditProject(root);
+      return;
+    case "gate":
+      if (rest.length > 0) {
+        throw new Error(`Unexpected arguments for "${command}".\n\n${usage()}`);
+      }
+      await gateProject(root);
+      return;
+    case "test":
     case "verify":
       if (rest.length > 0) {
         throw new Error(`Unexpected arguments for "${command}".\n\n${usage()}`);
       }
-      await verifyProject(root);
+      await testProject(root);
       return;
     case "doctor":
       if (rest.length > 0) {

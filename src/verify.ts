@@ -1,190 +1,96 @@
-import { denoConfigLabel, loadDenoProjectTasks } from "./deno_config.ts";
+import {
+  type CommandRunResult,
+  CommandStepError,
+  createSummaryStep,
+  extractCommandMetrics,
+  markStepFailed,
+  markStepPassed,
+  printCommandSummary,
+  writeCapturedOutput,
+} from "./command_summary.ts";
 import { cwdRootUrl } from "./paths.ts";
-import { BUILTIN_SERVICE_NAMES, loadProjectManifest } from "./project.ts";
+import type { CommandInvocation } from "./run.ts";
+import { verifyRequiredTasks } from "./project_checks.ts";
 
-const REQUIRED_DENO_TASKS = ["build", "start", "dev", "check"] as const;
-const REQUIRED_TEST_TASKS = ["test", "test:coverage", "test:e2e"] as const;
+const REQUIRED_VERIFY_TASKS = ["test:unit", "test:e2e"] as const;
+const OPTIONAL_VERIFY_TASKS = ["test:bruno", "test:ai"] as const;
+const VERIFY_STEP_LABELS: Record<string, string> = {
+  "test:unit": "Unit tests",
+  "test:bruno": "Bruno",
+  "test:ai": "AI component tests",
+  "test:e2e": "Playwright browser",
+};
 
-export async function verifyProject(root: URL = cwdRootUrl()): Promise<void> {
-  const manifest = await loadProjectManifest(root);
-  await verifyManifestFiles(root, manifest);
-  await verifyServiceDbBoundaries(root, manifest);
+export type VerifyCommandRunner = (
+  invocation: CommandInvocation,
+) => Promise<void | CommandRunResult>;
 
-  await verifyDenoTasks(root);
-  await runCommand(root, "deno", ["task", "check"], "deno task check");
-}
-
-async function verifyManifestFiles(
-  root: URL,
-  manifest: Awaited<ReturnType<typeof loadProjectManifest>>,
+export async function testProject(
+  root: URL = cwdRootUrl(),
+  runCommandFn: VerifyCommandRunner = defaultRunCommand,
 ): Promise<void> {
-  for (const service of manifest.services) {
-    if (BUILTIN_SERVICE_NAMES.includes(service.name as (typeof BUILTIN_SERVICE_NAMES)[number])) {
-      throw new Error(
-        `Built-in service "${service.name}" must not be declared in superstructure.project.json.`,
-      );
-    }
-    await requireDirectory(root, service.directory);
-    await requireFile(root, `${service.directory}/index.ts`);
-    await requireDirectory(root, `${service.directory}/db`);
-    await requireDirectory(root, `${service.directory}/db/queries`);
-    await requireDirectory(root, `${service.directory}/db/schema`);
-    await requireFile(root, `${service.directory}/db/index.ts`);
-    await requireFile(root, `${service.directory}/db/queries/index.ts`);
-    await requireFile(root, `${service.directory}/db/schema/index.ts`);
-  }
+  const steps = [createSummaryStep("Required test tasks")];
 
-  for (const surface of manifest.surfaces) {
-    await requireDirectory(root, surface.directory);
-    await requireFile(root, `${surface.directory}/index.ts`);
-  }
-}
+  try {
+    const tasks = await verifyRequiredTasks(root, REQUIRED_VERIFY_TASKS);
+    markStepPassed(steps[0]);
 
-async function verifyDenoTasks(root: URL): Promise<void> {
-  const tasks = await loadDenoProjectTasks(root);
+    const taskQueue = [
+      "test:unit",
+      ...OPTIONAL_VERIFY_TASKS.filter((task) => Boolean(tasks[task])),
+      "test:e2e",
+    ];
 
-  for (const task of [...REQUIRED_DENO_TASKS, ...REQUIRED_TEST_TASKS]) {
-    if (!tasks[task]) {
-      throw new Error(`Missing required ${denoConfigLabel()} task "${task}".`);
-    }
-  }
-}
+    for (const task of taskQueue) {
+      const step = createSummaryStep(VERIFY_STEP_LABELS[task] ?? task);
+      steps.push(step);
 
-async function verifyServiceDbBoundaries(
-  root: URL,
-  manifest: Awaited<ReturnType<typeof loadProjectManifest>>,
-): Promise<void> {
-  const platformDbRoot = new URL("apps/server/src/api/db/", root).pathname;
-
-  for (const service of manifest.services) {
-    const serviceRoot = new URL(`${service.directory}/`, root);
-    const serviceDbRoot = new URL(`${service.directory}/db/`, root).pathname;
-    const sourceFiles = await collectSourceFiles(serviceRoot);
-
-    for (const file of sourceFiles) {
-      const specifiers = extractModuleSpecifiers(await Deno.readTextFile(file));
-
-      for (const specifier of specifiers) {
-        if (specifier.includes("apps/server/src/api/db/")) {
-          throw new Error(
-            `Custom service "${service.name}" must not import platform DB internals: ${specifier}`,
-          );
+      try {
+        const result = await runCommandFn({ command: task, args: [task], root });
+        markStepPassed(step, result?.metrics ?? null);
+      } catch (error) {
+        if (error instanceof CommandStepError) {
+          markStepFailed(step, error.message, error.result.metrics);
+        } else {
+          markStepFailed(step, error instanceof Error ? error.message : String(error));
         }
-
-        if (!specifier.startsWith(".")) {
-          continue;
-        }
-
-        const resolvedPath = new URL(specifier, file).pathname;
-        if (resolvedPath.startsWith(platformDbRoot)) {
-          throw new Error(
-            `Custom service "${service.name}" must not import platform DB internals from "${
-              pathRelativeToRoot(root, file)
-            }".`,
-          );
-        }
-
-        if (resolvedPath.startsWith(serviceDbRoot)) {
-          continue;
-        }
-
-        const foreignService = manifest.services.find((entry) =>
-          entry.name !== service.name &&
-          resolvedPath.startsWith(new URL(`${entry.directory}/db/`, root).pathname)
-        );
-        if (foreignService) {
-          throw new Error(
-            `Custom service "${service.name}" must not import DB modules from service "${foreignService.name}".`,
-          );
-        }
+        throw error;
       }
     }
-  }
-}
-
-async function runCommand(
-  root: URL,
-  executable: string,
-  args: string[],
-  description: string,
-): Promise<void> {
-  const command = new Deno.Command(executable, {
-    args,
-    cwd: decodeURIComponent(root.pathname),
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const { code } = await command.output();
-  if (code !== 0) {
-    throw new Error(`Verification failed while running "${description}".`);
-  }
-}
-
-async function requireFile(root: URL, relativePath: string): Promise<void> {
-  const entry = await statPath(root, relativePath);
-  if (!entry.isFile) {
-    throw new Error(`Expected file at "${relativePath}".`);
-  }
-}
-
-async function requireDirectory(root: URL, relativePath: string): Promise<void> {
-  const entry = await statPath(root, relativePath);
-  if (!entry.isDirectory) {
-    throw new Error(`Expected directory at "${relativePath}".`);
-  }
-}
-
-async function statPath(root: URL, relativePath: string): Promise<Deno.FileInfo> {
-  try {
-    return await Deno.stat(new URL(relativePath, root));
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      throw new Error(`Missing required path "${relativePath}".`);
+    if (steps[0].status === "not-run") {
+      markStepFailed(steps[0], error instanceof Error ? error.message : String(error));
     }
+    printCommandSummary("Test", steps);
     throw error;
   }
+
+  printCommandSummary("Test", steps);
 }
 
-async function collectSourceFiles(root: URL): Promise<URL[]> {
-  const files: URL[] = [];
+export const verifyProject = testProject;
 
-  for await (const entry of Deno.readDir(root)) {
-    const entryUrl = new URL(entry.name, root);
-    if (entry.isDirectory) {
-      files.push(...await collectSourceFiles(new URL(`${entry.name}/`, root)));
-      continue;
-    }
+async function defaultRunCommand(invocation: CommandInvocation): Promise<CommandRunResult> {
+  const output = await new Deno.Command("deno", {
+    args: ["task", invocation.command],
+    cwd: decodeURIComponent(invocation.root.pathname),
+    stdout: "piped",
+    stderr: "piped",
+    stdin: "inherit",
+  }).output();
 
-    if (entry.isFile && /\.(?:[cm]?ts|tsx)$/u.test(entry.name)) {
-      files.push(entryUrl);
-    }
+  await writeCapturedOutput(output.stdout, output.stderr);
+
+  const metrics = extractCommandMetrics(
+    `${new TextDecoder().decode(output.stdout)}\n${new TextDecoder().decode(output.stderr)}`,
+  );
+  const result = { code: output.code, metrics };
+  if (output.code !== 0) {
+    throw new CommandStepError(
+      `Test command failed while running "deno task ${invocation.command}".`,
+      result,
+    );
   }
 
-  return files;
-}
-
-function extractModuleSpecifiers(source: string): string[] {
-  const specifiers: string[] = [];
-  const patterns = [
-    /\b(?:import|export)\b[\s\S]*?\bfrom\s*["']([^"']+)["']/gu,
-    /\bimport\s*["']([^"']+)["']/gu,
-    /import\s*\(\s*["']([^"']+)["']\s*\)/gu,
-  ];
-
-  for (const pattern of patterns) {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(source)) !== null) {
-      const specifier = match[1];
-      if (specifier) {
-        specifiers.push(specifier);
-      }
-    }
-  }
-
-  return specifiers;
-}
-
-function pathRelativeToRoot(root: URL, file: URL): string {
-  const rootPath = root.pathname.endsWith("/") ? root.pathname : `${root.pathname}/`;
-  return decodeURIComponent(file.pathname.slice(rootPath.length));
+  return result;
 }

@@ -8,8 +8,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  check:
-    name: Check
+  standards:
+    name: Quality Standards
     runs-on: ubuntu-latest
 
     steps:
@@ -23,11 +23,93 @@ jobs:
           install: true
           cache: true
 
-      - name: Run repo checks
-        run: deno task check
+      - name: Run deno fmt
+        run: deno fmt --check .
 
-      - name: Compile smoke binary
-        run: |
-          mkdir -p dist
-          deno compile -A --output dist/superctl main.ts
-          ./dist/superctl help
+      - name: Run deno lint
+        run: deno lint --config deno.json .
+
+  build:
+    name: Build And Compile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Run build task
+        run: deno task build
+
+      - name: Compile binary
+        run: deno task compile
+
+      - name: Smoke test compiled binary
+        run: ./dist/superctl help
+
+  gate:
+    name: Superctl Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Run superctl gate
+        run: deno run -A main.ts gate
+
+  test:
+    name: Superctl Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Run superctl test
+        run: deno run -A main.ts test
+
+  audit:
+    name: Superctl Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v4
+        with:
+          version: 2026.3.10
+          install: true
+          cache: true
+
+      - name: Run deno audit
+        run: deno audit --level=high
+
+      - name: Run superctl audit
+        run: deno run -A main.ts audit
