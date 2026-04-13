@@ -10,7 +10,7 @@ the only supported plugin implementation for workspace apps.
 
 - `main`: build `superctl` from the `daringway/superctl` default branch
 - `<tag>`: build `superctl` from a tagged GitHub archive, including release candidates like
-  `0.1.3-rc1`
+  `v0.1.3-rc1`
 - `local`: build `superctl` from `SUPERCTL_ROOT`
 
 ## Development
