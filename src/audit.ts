@@ -6,7 +6,7 @@ import {
   markStepFailed,
   markStepPassed,
   printCommandSummary,
-  writeCapturedOutput,
+  runCommandWithLiveOutput,
 } from "./command_summary.ts";
 import { cwdRootUrl } from "./paths.ts";
 
@@ -281,15 +281,11 @@ async function runGit(
 }
 
 async function defaultRunCommand(invocation: AuditCommandInvocation): Promise<CommandRunResult> {
-  const output = await new Deno.Command(invocation.command, {
-    args: invocation.args,
-    cwd: decodeURIComponent(invocation.root.pathname),
-    stdout: "piped",
-    stderr: "piped",
-    stdin: "inherit",
-  }).output();
-
-  await writeCapturedOutput(output.stdout, output.stderr);
+  const output = await runCommandWithLiveOutput(
+    invocation.command,
+    invocation.args,
+    decodeURIComponent(invocation.root.pathname),
+  );
 
   const metrics = extractCommandMetrics(
     `${new TextDecoder().decode(output.stdout)}\n${new TextDecoder().decode(output.stderr)}`,
