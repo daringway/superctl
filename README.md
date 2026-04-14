@@ -26,11 +26,12 @@ under `tests/smoke/`, a GitHub Actions quality workflow, generated registries, a
 `site` surface so `superctl start` can serve a welcome page immediately.
 
 `superctl gate` is the PR-quality and policy command. It runs format and lint checks, validates the
-project structure contract, enforces the repo-root `tests/` layout policy, validates the live GitHub
-repo policy for a protected `main` branch, and enforces the completed exec-plan rule.
-`superctl test` is test-only. It requires `test:unit` plus `test:e2e`, and also runs optional
-`test:bruno` and `test:ai` tasks when the project defines them. `superctl audit` is security-only.
-It runs secret scanning and dependency vulnerability checks as a separate, more expensive PR check.
+project structure contract, enforces the repo-root `tests/` layout policy, and enforces the
+completed exec-plan rule. `superctl test` is test-only. It requires `test:unit` plus `test:e2e`, and
+also runs optional `test:bruno` and `test:ai` tasks when the project defines them. `superctl
+audit`
+is security-only. It runs secret scanning and dependency vulnerability checks as a separate, more
+expensive PR check.
 
 ## Install
 

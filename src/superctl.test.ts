@@ -9,12 +9,6 @@ import { join, resolve } from "node:path";
 import { auditProject, findSecretScanIssues } from "./audit.ts";
 import { doctorProject } from "./doctor.ts";
 import { extractPlanStatus, gateProject } from "./gate.ts";
-import {
-  extractCheckNamesFromQualityWorkflow,
-  parseGitHubRepositoryCoordinates,
-  validateGitHubRepoPolicy,
-  verifyGitHubRepoPolicy,
-} from "./github_repo_policy.ts";
 import { main } from "../main.ts";
 import { buildProject, devProject, startProject } from "./run.ts";
 import { addService, addSurface, initProject } from "./scaffold.ts";
@@ -1027,7 +1021,7 @@ Deno.test("gate requires a changed completed exec plan", async () => {
         gateProject(root, ({ label }) => {
           invocations.push(label);
           return Promise.resolve();
-        }, () => Promise.resolve()),
+        }),
       Error,
       "changed exec-plan marked Completed",
     );
@@ -1058,7 +1052,7 @@ Deno.test("gate prints a summary when a step fails", async () => {
               return Promise.reject(new Error("lint failed"));
             }
             return Promise.resolve();
-          }, () => Promise.resolve()),
+          }),
         Error,
         "lint failed",
       );
@@ -1069,11 +1063,10 @@ Deno.test("gate prints a summary when a step fails", async () => {
     assertStringIncludes(output, "✓ Project structure: 1 of 1 passed");
     assertStringIncludes(output, "✓ Required tasks: 1 of 1 passed");
     assertStringIncludes(output, "✓ Test layout: 1 of 1 passed");
-    assertStringIncludes(output, "✓ GitHub repo policy: 1 of 1 passed");
     assertStringIncludes(output, "✓ Format check: 1 of 1 passed");
     assertStringIncludes(output, "✗ Lint: 0 of 1 passed");
     assertStringIncludes(output, "✓ Exec plan completion: 1 of 1 passed");
-    assertStringIncludes(output, "Overall: FAILED (6 passed, 1 failed)");
+    assertStringIncludes(output, "Overall: FAILED (5 passed, 1 failed)");
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -1187,264 +1180,9 @@ Deno.test("gate accepts a changed completed exec plan file", async () => {
     await gateProject(root, ({ label }) => {
       invocations.push(label);
       return Promise.resolve();
-    }, () => Promise.resolve());
+    });
 
     assertEquals(invocations, ["format check", "lint"]);
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
-
-Deno.test("parseGitHubRepositoryCoordinates supports HTTPS and SSH remotes", () => {
-  assertEquals(
-    parseGitHubRepositoryCoordinates("https://github.com/daringway/superctl.git"),
-    { owner: "daringway", repo: "superctl" },
-  );
-  assertEquals(
-    parseGitHubRepositoryCoordinates("git@github.com:daringway/superctl.git"),
-    { owner: "daringway", repo: "superctl" },
-  );
-  assertEquals(
-    parseGitHubRepositoryCoordinates("ssh://git@github.com/daringway/superctl.git"),
-    { owner: "daringway", repo: "superctl" },
-  );
-  assertEquals(parseGitHubRepositoryCoordinates("https://example.com/other/repo.git"), null);
-});
-
-Deno.test("extractCheckNamesFromQualityWorkflow reads named jobs and falls back to job ids", () => {
-  const source = [
-    "name: Quality Checks",
-    "",
-    "jobs:",
-    "  release_version:",
-    "    name: Release Version Available",
-    "    runs-on: ubuntu-latest",
-    "  gate:",
-    "    runs-on: ubuntu-latest",
-    "  audit:",
-    '    name: "Superctl Audit"',
-    "    runs-on: ubuntu-latest",
-    "",
-  ].join("\n");
-
-  assertEquals(extractCheckNamesFromQualityWorkflow(source), [
-    "Release Version Available",
-    "gate",
-    "Superctl Audit",
-  ]);
-});
-
-Deno.test("validateGitHubRepoPolicy reports mismatched settings", () => {
-  const issues = validateGitHubRepoPolicy({
-    allowAutoMerge: true,
-    allowSquashMerge: true,
-    allowMergeCommit: true,
-    allowRebaseMerge: true,
-    deleteBranchOnMerge: false,
-    defaultBranch: "main",
-    branchProtectionPatterns: [{
-      pattern: "main",
-      requiresApprovingReviews: true,
-      requiredApprovingReviewCount: 2,
-      requiresCodeOwnerReviews: true,
-      dismissesStaleReviews: true,
-      requiresStatusChecks: false,
-      requiredStatusCheckContexts: ["Wrong Check"],
-    }],
-    expectedStatusChecks: ["Superctl Gate", "Superctl Test"],
-    codeownersSource: "* @someone-else\n",
-  });
-
-  assertArrayIncludes(issues, [
-    'CODEOWNERS must include a catch-all "*" rule for "@daringway/autopilot".',
-    "GitHub repository setting allow_auto_merge must be disabled.",
-    "GitHub repository setting allow_merge_commit must be disabled.",
-    "GitHub repository setting allow_rebase_merge must be disabled.",
-    "GitHub repository setting delete_branch_on_merge must be enabled.",
-    'Branch protection for "main" must not require approvals.',
-    'Branch protection for "main" must require exactly 0 approving reviews.',
-    'Branch protection for "main" must not dismiss stale reviews.',
-    'Branch protection for "main" must not require CODEOWNERS reviews.',
-  ]);
-  assertStringIncludes(
-    issues.join("\n"),
-    'Branch protection for "main" must require exactly these status checks: Superctl Gate, Superctl Test. Found: Wrong Check.',
-  );
-});
-
-Deno.test("validateGitHubRepoPolicy requires main as the default branch", () => {
-  const issues = validateGitHubRepoPolicy({
-    allowAutoMerge: false,
-    allowSquashMerge: true,
-    allowMergeCommit: false,
-    allowRebaseMerge: false,
-    deleteBranchOnMerge: true,
-    defaultBranch: "develop",
-    branchProtectionPatterns: [{
-      pattern: "main",
-      requiresApprovingReviews: false,
-      requiredApprovingReviewCount: 0,
-      requiresCodeOwnerReviews: false,
-      dismissesStaleReviews: false,
-      requiresStatusChecks: true,
-      requiredStatusCheckContexts: ["Superctl Gate", "Superctl Test"],
-    }],
-    expectedStatusChecks: ["Superctl Gate", "Superctl Test"],
-    codeownersSource: "* @daringway/autopilot\n",
-  });
-
-  assertArrayIncludes(issues, ['GitHub repository default branch must be "main".']);
-});
-
-Deno.test("validateGitHubRepoPolicy requires an exact main branch protection rule", () => {
-  const issues = validateGitHubRepoPolicy({
-    allowAutoMerge: false,
-    allowSquashMerge: true,
-    allowMergeCommit: false,
-    allowRebaseMerge: false,
-    deleteBranchOnMerge: true,
-    defaultBranch: "main",
-    branchProtectionPatterns: [{
-      pattern: "release/*",
-      requiresApprovingReviews: false,
-      requiredApprovingReviewCount: 0,
-      requiresCodeOwnerReviews: false,
-      dismissesStaleReviews: false,
-      requiresStatusChecks: true,
-      requiredStatusCheckContexts: ["Superctl Gate", "Superctl Test"],
-    }],
-    expectedStatusChecks: ["Superctl Gate", "Superctl Test"],
-    codeownersSource: "* @daringway/autopilot\n",
-  });
-
-  assertArrayIncludes(issues, ['Branch "main" must have an exact branch protection rule.']);
-});
-
-Deno.test("verifyGitHubRepoPolicy skips repos without a GitHub origin", async () => {
-  const rootPath = await Deno.makeTempDir({ prefix: "superctl-github-policy-fixture-" });
-  const root = new URL(`file://${rootPath}/`);
-
-  try {
-    await verifyGitHubRepoPolicy(root, {
-      resolveOriginUrl: () => Promise.resolve(null),
-    });
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
-
-Deno.test("verifyGitHubRepoPolicy accepts matching GitHub repo settings", async () => {
-  const rootPath = await Deno.makeTempDir({ prefix: "superctl-github-policy-fixture-" });
-  const root = new URL(`file://${rootPath}/`);
-
-  try {
-    await writeQualityWorkflow(
-      root,
-      [
-        "name: Quality Checks",
-        "",
-        "jobs:",
-        "  standards:",
-        "    name: Quality Standards",
-        "    runs-on: ubuntu-latest",
-        "  gate:",
-        "    name: Superctl Gate",
-        "    runs-on: ubuntu-latest",
-        "  test:",
-        "    name: Superctl Test",
-        "    runs-on: ubuntu-latest",
-        "  audit:",
-        "    name: Superctl Audit",
-        "    runs-on: ubuntu-latest",
-        "",
-      ].join("\n"),
-    );
-    await Deno.writeTextFile(new URL(".github/CODEOWNERS", root), "* @daringway/autopilot\n");
-
-    await verifyGitHubRepoPolicy(root, {
-      resolveOriginUrl: () => Promise.resolve("https://github.com/daringway/superctl.git"),
-      resolveGitHubToken: () => Promise.resolve("token"),
-      fetchGraphql: () =>
-        Promise.resolve({
-          data: {
-            repository: {
-              autoMergeAllowed: false,
-              squashMergeAllowed: true,
-              mergeCommitAllowed: false,
-              rebaseMergeAllowed: false,
-              deleteBranchOnMerge: true,
-              defaultBranchRef: { name: "main" },
-              branchProtectionRules: {
-                nodes: [{
-                  pattern: "main",
-                  requiresApprovingReviews: false,
-                  requiredApprovingReviewCount: 0,
-                  requiresCodeOwnerReviews: false,
-                  dismissesStaleReviews: false,
-                  requiresStatusChecks: true,
-                  requiredStatusCheckContexts: [
-                    "Quality Standards",
-                    "Superctl Gate",
-                    "Superctl Test",
-                    "Superctl Audit",
-                  ],
-                }],
-              },
-            },
-          },
-        }),
-    });
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
-});
-
-Deno.test("verifyGitHubRepoPolicy rejects missing CODEOWNERS baseline", async () => {
-  const rootPath = await Deno.makeTempDir({ prefix: "superctl-github-policy-fixture-" });
-  const root = new URL(`file://${rootPath}/`);
-
-  try {
-    await writeQualityWorkflow(root);
-    await Deno.writeTextFile(new URL(".github/CODEOWNERS", root), "* @someone-else\n");
-
-    await assertRejects(
-      () =>
-        verifyGitHubRepoPolicy(root, {
-          resolveOriginUrl: () => Promise.resolve("https://github.com/daringway/superctl.git"),
-          resolveGitHubToken: () => Promise.resolve("token"),
-          fetchGraphql: () =>
-            Promise.resolve({
-              data: {
-                repository: {
-                  autoMergeAllowed: false,
-                  squashMergeAllowed: true,
-                  mergeCommitAllowed: false,
-                  rebaseMergeAllowed: false,
-                  deleteBranchOnMerge: true,
-                  defaultBranchRef: { name: "main" },
-                  branchProtectionRules: {
-                    nodes: [{
-                      pattern: "main",
-                      requiresApprovingReviews: false,
-                      requiredApprovingReviewCount: 0,
-                      requiresCodeOwnerReviews: false,
-                      dismissesStaleReviews: false,
-                      requiresStatusChecks: true,
-                      requiredStatusCheckContexts: [
-                        "standards",
-                        "gate",
-                        "test",
-                        "audit",
-                      ],
-                    }],
-                  },
-                },
-              },
-            }),
-        }),
-      Error,
-      'CODEOWNERS must include a catch-all "*" rule for "@daringway/autopilot".',
-    );
   } finally {
     await Deno.remove(root, { recursive: true });
   }

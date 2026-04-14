@@ -12,7 +12,6 @@ import {
   hasProjectManifest,
   REQUIRED_GATE_TASKS,
   verifyAgentDocsStructure,
-  verifyGitHubRepoPolicy,
   verifyManifestFiles,
   verifyRequiredTasks,
   verifyServiceDbBoundaries,
@@ -33,7 +32,6 @@ export type GateCommandRunner = (
 export async function gateProject(
   root: URL = cwdRootUrl(),
   runCommandFn: GateCommandRunner = defaultRunCommand,
-  verifyGitHubRepoPolicyFn: (root: URL) => Promise<void> = verifyGitHubRepoPolicy,
 ): Promise<void> {
   const manifestProject = await hasProjectManifest(root);
   const steps = [
@@ -43,7 +41,6 @@ export async function gateProject(
       : []),
     createSummaryStep("Required tasks"),
     createSummaryStep("Test layout"),
-    createSummaryStep("GitHub repo policy"),
     createSummaryStep("Format check"),
     createSummaryStep("Lint"),
     createSummaryStep("Exec plan completion"),
@@ -79,11 +76,6 @@ export async function gateProject(
     failures,
     "Test layout",
     runGateCheckStep(steps[index++], () => verifyTestLayout(root)),
-  );
-  await collectGateFailure(
-    failures,
-    "GitHub repo policy",
-    runGateCheckStep(steps[index++], () => verifyGitHubRepoPolicyFn(root)),
   );
 
   await collectGateFailure(
