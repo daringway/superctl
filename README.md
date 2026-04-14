@@ -26,28 +26,31 @@ under `tests/smoke/`, a GitHub Actions quality workflow, generated registries, a
 `site` surface so `superctl start` can serve a welcome page immediately.
 
 `superctl gate` is the PR-quality and policy command. It runs format and lint checks, validates the
-project structure contract, enforces the repo-root `tests/` layout policy, and enforces the
-completed exec-plan rule. `superctl test` is test-only. It requires `test:unit` plus `test:e2e`, and
-also runs optional `test:bruno` and `test:ai` tasks when the project defines them. `superctl
-audit`
-is security-only. It runs secret scanning and dependency vulnerability checks as a separate, more
-expensive PR check.
+project structure contract, enforces the repo-root `tests/` layout policy, validates the live GitHub
+repo policy for a protected `main` branch, and enforces the completed exec-plan rule.
+`superctl test` is test-only. It requires `test:unit` plus `test:e2e`, and also runs optional
+`test:bruno` and `test:ai` tasks when the project defines them. `superctl audit` is security-only.
+It runs secret scanning and dependency vulnerability checks as a separate, more expensive PR check.
 
 ## Install
 
 Install from GitHub Releases with `mise`:
 
 ```bash
-mise use -g github:daringway/superctl@v0.1.2
+mise use -g github:daringway/superctl@v0.1.3
 mise install
 ```
 
+The GitHub backend consumes published GitHub Releases, not bare git tags. Merged pull requests to
+`main` create the matching `v*` tag and publish the release assets automatically.
+
 Within the `autopilot-ai-dev` workspace, apps should link the canonical plugin under
-`repos/superctl/mise-plugin` and keep their committed `.mise.toml` on `superctl = "main"`:
+`repos/superctl/mise-plugin` and install whatever `superctl` version the app pins in its committed
+`.mise.toml`:
 
 ```bash
 mise plugin link --force superctl /absolute/path/to/repos/superctl/mise-plugin
-mise install -f superctl@main
+mise install -f superctl
 ```
 
 For opt-in local CLI development against a sibling `superctl` checkout:

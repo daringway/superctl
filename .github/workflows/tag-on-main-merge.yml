@@ -15,6 +15,8 @@ jobs:
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.version.outputs.tag_name }}
 
     steps:
       - name: Checkout merged commit
@@ -26,7 +28,8 @@ jobs:
       - name: Fetch remote tags
         run: git fetch --force --tags origin
 
-      - name: Create and push release tag
+      - name: Determine release tag
+        id: version
         run: |
           version="$(node -p "require('./deno.json').version")"
           if [ -z "${version}" ]; then
@@ -34,7 +37,11 @@ jobs:
             exit 1
           fi
 
-          tag="v${version}"
+          echo "tag_name=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create and push release tag
+        run: |
+          tag="${{ steps.version.outputs.tag_name }}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "::error::Release tag ${tag} already exists. Bump deno.json version before merging to main."
             exit 1
@@ -57,3 +64,11 @@ jobs:
 
           echo "::error::Failed to push release tag ${tag}."
           exit 1
+
+  release:
+    name: Publish Release
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag_name: ${{ needs.tag.outputs.tag_name }}
+    secrets: inherit

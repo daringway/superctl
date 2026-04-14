@@ -1,4 +1,5 @@
 import { denoConfigLabel, loadDenoProjectTasks } from "./deno_config.ts";
+export { verifyGitHubRepoPolicy } from "./github_repo_policy.ts";
 import { BUILTIN_SERVICE_NAMES, loadProjectManifest } from "./project.ts";
 
 export const REQUIRED_GATE_TASKS = ["build", "start", "dev", "lint"] as const;

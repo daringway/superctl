@@ -2,6 +2,12 @@ name: Quality Checks
 
 on:
   pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - converted_to_draft
   workflow_dispatch:
 
 env:
@@ -10,6 +16,7 @@ env:
 jobs:
   release-version:
     name: Release Version Available
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -46,6 +53,7 @@ jobs:
 
   standards:
     name: Quality Standards
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -67,6 +75,7 @@ jobs:
 
   build:
     name: Build And Compile
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -111,6 +120,7 @@ jobs:
 
   test:
     name: Superctl Test
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -129,6 +139,7 @@ jobs:
 
   audit:
     name: Superctl Audit
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
