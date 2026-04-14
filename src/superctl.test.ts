@@ -67,10 +67,17 @@ async function writeQualityWorkflow(root: URL, source?: string): Promise<void> {
         "",
         "on:",
         "  pull_request:",
+        "    types:",
+        "      - opened",
+        "      - reopened",
+        "      - synchronize",
+        "      - ready_for_review",
+        "      - converted_to_draft",
         "  workflow_dispatch:",
         "",
         "jobs:",
         "  standards:",
+        "    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false",
         "    runs-on: ubuntu-latest",
         "    steps:",
         "      - run: deno fmt --check .",
@@ -82,11 +89,13 @@ async function writeQualityWorkflow(root: URL, source?: string): Promise<void> {
         "      - run: deno run -A .github/tools/superctl/main.ts gate",
         "",
         "  test:",
+        "    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false",
         "    runs-on: ubuntu-latest",
         "    steps:",
         "      - run: deno run -A .github/tools/superctl/main.ts test",
         "",
         "  audit:",
+        "    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false",
         "    runs-on: ubuntu-latest",
         "    steps:",
         "      - run: deno run -A .github/tools/superctl/main.ts audit",
@@ -319,7 +328,13 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     await Deno.stat(new URL("agent-docs/exec-plans/active/.gitkeep", fixture.root));
     await Deno.stat(new URL("agent-docs/exec-plans/completed/.gitkeep", fixture.root));
     assertStringIncludes(qualityWorkflow, "pull_request");
+    assertStringIncludes(qualityWorkflow, "ready_for_review");
+    assertStringIncludes(qualityWorkflow, "converted_to_draft");
     assertStringIncludes(qualityWorkflow, "Quality Standards");
+    assertStringIncludes(
+      qualityWorkflow,
+      "if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false",
+    );
     assertStringIncludes(qualityWorkflow, "deno fmt --check .");
     assertStringIncludes(qualityWorkflow, "deno lint --config deno.json .");
     assertStringIncludes(qualityWorkflow, "Superctl Gate");

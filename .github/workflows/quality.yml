@@ -2,6 +2,12 @@ name: Quality Checks
 
 on:
   pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - converted_to_draft
   workflow_dispatch:
 
 env:
@@ -10,6 +16,7 @@ env:
 jobs:
   release-version:
     name: Release Version Available
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -46,6 +53,7 @@ jobs:
 
   standards:
     name: Quality Standards
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -67,6 +75,7 @@ jobs:
 
   build:
     name: Build And Compile
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -106,11 +115,12 @@ jobs:
           install: true
           cache: true
 
-      - name: Run superctl gate
-        run: deno run -A main.ts gate
+      - name: Run repo gate
+        run: deno task ci:gate
 
   test:
     name: Superctl Test
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -124,11 +134,12 @@ jobs:
           install: true
           cache: true
 
-      - name: Run superctl test
-        run: deno run -A main.ts test
+      - name: Run repo test
+        run: deno task ci:test
 
   audit:
     name: Superctl Audit
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -147,5 +158,5 @@ jobs:
       - name: Run deno audit
         run: deno audit --level=high
 
-      - name: Run superctl audit
-        run: deno run -A main.ts audit
+      - name: Run repo audit
+        run: deno task ci:audit

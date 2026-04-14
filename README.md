@@ -38,16 +38,20 @@ expensive PR check.
 Install from GitHub Releases with `mise`:
 
 ```bash
-mise use -g github:daringway/superctl@v0.1.2
+mise use -g github:daringway/superctl@v0.1.3
 mise install
 ```
 
+The GitHub backend consumes published GitHub Releases, not bare git tags. Merged pull requests to
+`main` create the matching `v*` tag and publish the release assets automatically.
+
 Within the `autopilot-ai-dev` workspace, apps should link the canonical plugin under
-`repos/superctl/mise-plugin` and keep their committed `.mise.toml` on `superctl = "main"`:
+`repos/superctl/mise-plugin` and install whatever `superctl` version the app pins in its committed
+`.mise.toml`:
 
 ```bash
 mise plugin link --force superctl /absolute/path/to/repos/superctl/mise-plugin
-mise install -f superctl@main
+mise install -f superctl
 ```
 
 For opt-in local CLI development against a sibling `superctl` checkout:
