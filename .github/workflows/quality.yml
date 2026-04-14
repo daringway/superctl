@@ -115,8 +115,8 @@ jobs:
           install: true
           cache: true
 
-      - name: Run superctl gate
-        run: deno run -A main.ts gate
+      - name: Run repo gate
+        run: deno task ci:gate
 
   test:
     name: Superctl Test
@@ -134,8 +134,8 @@ jobs:
           install: true
           cache: true
 
-      - name: Run superctl test
-        run: deno run -A main.ts test
+      - name: Run repo test
+        run: deno task ci:test
 
   audit:
     name: Superctl Audit
@@ -158,5 +158,5 @@ jobs:
       - name: Run deno audit
         run: deno audit --level=high
 
-      - name: Run superctl audit
-        run: deno run -A main.ts audit
+      - name: Run repo audit
+        run: deno task ci:audit

@@ -29,6 +29,18 @@
       "description": "Run format, lint, type-check, and tests for superctl",
       "command": "deno fmt --check . && deno task lint && deno task typecheck && deno task test:unit"
     },
+    "ci:gate": {
+      "description": "Run repo gate checks without shelling through the CLI entrypoint",
+      "command": "deno run -A scripts/ci_gate.ts"
+    },
+    "ci:test": {
+      "description": "Run repo test checks without shelling through the CLI entrypoint",
+      "command": "deno run -A scripts/ci_test.ts"
+    },
+    "ci:audit": {
+      "description": "Run repo audit checks without shelling through the CLI entrypoint",
+      "command": "deno run -A scripts/ci_audit.ts"
+    },
     "compile": {
       "description": "Compile the superctl binary to dist/superctl",
       "command": "deno compile -A --output dist/superctl main.ts"
