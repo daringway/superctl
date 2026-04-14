@@ -116,6 +116,8 @@ jobs:
           cache: true
 
       - name: Run repo gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: deno task ci:gate
 
   test:
