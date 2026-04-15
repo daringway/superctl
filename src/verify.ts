@@ -6,7 +6,7 @@ import {
   markStepFailed,
   markStepPassed,
   printCommandSummary,
-  writeCapturedOutput,
+  runCommandWithLiveOutput,
 } from "./command_summary.ts";
 import { cwdRootUrl } from "./paths.ts";
 import type { CommandInvocation } from "./run.ts";
@@ -71,15 +71,11 @@ export async function testProject(
 export const verifyProject = testProject;
 
 async function defaultRunCommand(invocation: CommandInvocation): Promise<CommandRunResult> {
-  const output = await new Deno.Command("deno", {
-    args: ["task", invocation.command],
-    cwd: decodeURIComponent(invocation.root.pathname),
-    stdout: "piped",
-    stderr: "piped",
-    stdin: "inherit",
-  }).output();
-
-  await writeCapturedOutput(output.stdout, output.stderr);
+  const output = await runCommandWithLiveOutput(
+    "deno",
+    ["task", invocation.command],
+    decodeURIComponent(invocation.root.pathname),
+  );
 
   const metrics = extractCommandMetrics(
     `${new TextDecoder().decode(output.stdout)}\n${new TextDecoder().decode(output.stderr)}`,

@@ -171,15 +171,18 @@ async function inspectQualityWorkflow(root: URL, findings: DoctorFinding[]): Pro
     });
   }
 
-  const runsGateAndTestAndAudit = source.includes("main.ts gate") &&
+  const runsDirectSuperctlChecks = source.includes("superctl gate") &&
+    (source.includes("superctl test") || source.includes("superctl verify")) &&
+    source.includes("superctl audit");
+  const runsVendoredSuperctlChecks = source.includes("main.ts gate") &&
     (source.includes("main.ts test") || source.includes("main.ts verify")) &&
     source.includes("main.ts audit");
   const runsLegacyCheck = source.includes("deno task check");
-  if (!runsGateAndTestAndAudit && !runsLegacyCheck) {
+  if (!runsDirectSuperctlChecks && !runsVendoredSuperctlChecks && !runsLegacyCheck) {
     findings.push({
       severity: "error",
       message:
-        `GitHub Actions quality workflow "${workflowFile}" must run "superctl gate", "superctl test", and "superctl audit" or the legacy "deno task check".`,
+        `GitHub Actions quality workflow "${workflowFile}" must run direct "superctl gate", "superctl test"/"superctl verify", and "superctl audit" checks, the vendored ".github/tools/superctl/main.ts" equivalents, or the legacy "deno task check".`,
     });
   }
 }

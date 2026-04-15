@@ -8,6 +8,17 @@ export interface CommandRunResult {
   metrics: CommandMetrics | null;
 }
 
+export interface CapturedCommandOutput {
+  code: number;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+}
+
+export interface CommandOutputWriters {
+  stdout?: BinaryWriter;
+  stderr?: BinaryWriter;
+}
+
 export type SummaryStepStatus = "passed" | "failed" | "not-run";
 
 export interface SummaryStep {
@@ -120,13 +131,31 @@ export function extractCommandMetrics(output: string): CommandMetrics | null {
   return null;
 }
 
-export async function writeCapturedOutput(stdout: Uint8Array, stderr: Uint8Array): Promise<void> {
-  if (stdout.length > 0) {
-    await Deno.stdout.write(stdout);
-  }
-  if (stderr.length > 0) {
-    await Deno.stderr.write(stderr);
-  }
+export async function runCommandWithLiveOutput(
+  command: string,
+  args: string[],
+  cwd: string,
+  writers: CommandOutputWriters = {},
+): Promise<CapturedCommandOutput> {
+  const child = new Deno.Command(command, {
+    args,
+    cwd,
+    stdout: "piped",
+    stderr: "piped",
+    stdin: "inherit",
+  }).spawn();
+
+  const [stdout, stderr, status] = await Promise.all([
+    readAndMirror(child.stdout, writers.stdout ?? Deno.stdout),
+    readAndMirror(child.stderr, writers.stderr ?? Deno.stderr),
+    child.status,
+  ]);
+
+  return {
+    code: status.code,
+    stdout,
+    stderr,
+  };
 }
 
 function formatStepMetrics(
@@ -145,4 +174,53 @@ function toMetrics(passed: number, failed: number): CommandMetrics {
     passed,
     total: passed + failed,
   };
+}
+
+export interface BinaryWriter {
+  write(data: Uint8Array): Promise<number>;
+}
+
+async function readAndMirror(
+  stream: ReadableStream<Uint8Array> | null,
+  writer: BinaryWriter,
+): Promise<Uint8Array> {
+  if (!stream) {
+    return new Uint8Array();
+  }
+
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (!value || value.length === 0) {
+        continue;
+      }
+
+      chunks.push(value);
+      totalLength += value.length;
+      await writer.write(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return concatChunks(chunks, totalLength);
+}
+
+function concatChunks(chunks: readonly Uint8Array[], totalLength: number): Uint8Array {
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return output;
 }
