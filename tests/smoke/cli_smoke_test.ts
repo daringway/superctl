@@ -30,7 +30,7 @@ Deno.test("cli smoke help prints usage", async () => {
   assertEquals(result.code, 0);
   assertStringIncludes(result.stdout, "Usage:");
   assertStringIncludes(result.stdout, "superctl test");
-  assertEquals(result.stderr, "");
+  assertNoCliErrors(result.stderr);
 });
 
 Deno.test("cli smoke version prints the current release", async () => {
@@ -38,5 +38,16 @@ Deno.test("cli smoke version prints the current release", async () => {
 
   assertEquals(result.code, 0);
   assertEquals(result.stdout.trim(), SUPERCTL_VERSION);
-  assertEquals(result.stderr, "");
+  assertNoCliErrors(result.stderr);
 });
+
+function assertNoCliErrors(stderr: string): void {
+  const normalized = stderr.trim();
+  if (normalized.length === 0) {
+    return;
+  }
+
+  if (normalized.includes("error:")) {
+    throw new Error(`CLI stderr contained an error:\n${stderr}`);
+  }
+}

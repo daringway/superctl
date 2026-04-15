@@ -167,7 +167,7 @@ async function updateReleaseDocs(root: URL, version: string): Promise<void> {
     (source) =>
       replaceRequired(
         source,
-        /superctl = "\d+\.\d+\.\d+(?:-rc\d+)?"/u,
+        /superctl = "(?:main|\d+\.\d+\.\d+(?:-rc\d+)?)"/u,
         `superctl = "${version}"`,
       ),
   );
@@ -176,7 +176,7 @@ async function updateReleaseDocs(root: URL, version: string): Promise<void> {
     (source) =>
       replaceRequired(
         source,
-        /superctl_version="\d+\.\d+\.\d+(?:-rc\d+)?"/u,
+        /superctl_version="(?:main|\d+\.\d+\.\d+(?:-rc\d+)?)"/u,
         `superctl_version="${version}"`,
       ),
   );

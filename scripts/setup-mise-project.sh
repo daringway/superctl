@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-superctl_version="main"
+superctl_version="0.1.6"
 deno_version="2.7.10"
 mise_file=".mise.toml"
 mise_local_file="mise.local.toml"
