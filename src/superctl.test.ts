@@ -575,6 +575,63 @@ Deno.test("doctor reports healthy configuration without running verification", a
   }
 });
 
+Deno.test("doctor accepts repo-local ci tasks in the quality workflow", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-doctor-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+
+  try {
+    await writeProjectConfig(root, "deno.json");
+    await writeQualityWorkflow(
+      root,
+      [
+        "name: Quality Checks",
+        "",
+        "on:",
+        "  pull_request:",
+        "  workflow_dispatch:",
+        "",
+        "jobs:",
+        "  gate:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: deno task ci:gate",
+        "",
+        "  test:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: deno task ci:test",
+        "",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: deno task ci:audit",
+        "",
+      ].join("\n"),
+    );
+    await writeProjectManifest(root, {
+      schemaVersion: 1,
+      services: [],
+      surfaces: [
+        {
+          name: "site",
+          directory: "superstructure/surfaces/site",
+          path: "/site",
+          enabled: true,
+          rootEligible: true,
+        },
+      ],
+      deployment: {
+        rootSurface: "site",
+      },
+    });
+
+    const messages = await captureConsoleLog(() => doctorProject(root));
+    assertStringIncludes(messages.join("\n"), "Configuration looks healthy.");
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("doctor reports root surface misconfiguration", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-doctor-fixture-" });
   const root = new URL(`file://${rootPath}/`);

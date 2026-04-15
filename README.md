@@ -35,6 +35,9 @@ audit`
 is security-only. It runs secret scanning and dependency vulnerability checks as a separate, more
 expensive PR check.
 
+For this `superctl` repository itself, use the repo-local Deno entrypoints in CI and local PR
+validation: `deno task ci:gate`, `deno task ci:test`, and `deno task ci:audit`.
+
 ## Install
 
 For initial project setup, use the one-liner first. It checks that `mise` is installed, creates
@@ -88,6 +91,9 @@ export `GITHUB_TOKEN` before `mise install` to avoid GitHub API rate-limit failu
 ```bash
 mise install
 deno task check
+deno task ci:gate
+deno task ci:test
+deno task ci:audit
 ```
 
 ## Releases
