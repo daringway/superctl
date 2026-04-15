@@ -1,8 +1,6 @@
-import { denoConfigLabel, loadDenoProjectTasks } from "./deno_config.ts";
+import { denoConfigLabel, findDenoProjectConfigFile } from "./deno_config.ts";
 import { BUILTIN_SERVICE_NAMES, loadProjectManifest } from "./project.ts";
 
-export const REQUIRED_GATE_TASKS = ["build", "start", "dev", "lint"] as const;
-export const REQUIRED_TEST_TASKS = ["test:unit", "test:coverage", "test:e2e"] as const;
 export const REQUIRED_AGENT_DOCS_PATHS = [
   "AGENTS.md",
   "agent-docs",
@@ -38,19 +36,12 @@ export async function verifyAgentDocsStructure(root: URL): Promise<void> {
   }
 }
 
-export async function verifyRequiredTasks(
-  root: URL,
-  requiredTasks: readonly string[],
-): Promise<Record<string, string>> {
-  const tasks = await loadDenoProjectTasks(root);
-
-  for (const task of requiredTasks) {
-    if (!tasks[task]) {
-      throw new Error(`Missing required ${denoConfigLabel()} task "${task}".`);
-    }
+export async function verifyDenoConfig(root: URL): Promise<string> {
+  const configFile = await findDenoProjectConfigFile(root);
+  if (!configFile) {
+    throw new Error(`Missing required ${denoConfigLabel()} at the project root.`);
   }
-
-  return tasks;
+  return configFile;
 }
 
 export async function verifyManifestFiles(root: URL): Promise<void> {

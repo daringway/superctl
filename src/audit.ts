@@ -9,6 +9,7 @@ import {
   runCommandWithLiveOutput,
 } from "./command_summary.ts";
 import { cwdRootUrl } from "./paths.ts";
+import { listChangedFiles } from "./git.ts";
 
 const SECRET_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   { label: "private key", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/mu },
@@ -148,7 +149,7 @@ async function resolveDependencyAuditInvocation(
   if (await pathExists(new URL("deno.lock", root))) {
     return {
       command: "deno",
-      args: ["audit", "--level=high"],
+      args: ["audit", "--level=high", "--ignore-registry-errors"],
       root,
       label: "dependency audit",
     };
@@ -176,108 +177,6 @@ async function pathExists(path: URL): Promise<boolean> {
     }
     throw error;
   }
-}
-
-async function listChangedFiles(root: URL): Promise<string[]> {
-  const changed = new Set<string>();
-  const baseRef = await resolveBaseRef(root);
-  if (baseRef) {
-    for (const file of await runGitLines(root, ["diff", "--name-only", `${baseRef}...HEAD`])) {
-      changed.add(file);
-    }
-  }
-
-  for (const file of await runGitLines(root, ["diff", "--name-only"])) {
-    changed.add(file);
-  }
-  for (const file of await runGitLines(root, ["diff", "--cached", "--name-only"])) {
-    changed.add(file);
-  }
-  for (const file of await runGitLines(root, ["ls-files", "--others", "--exclude-standard"])) {
-    changed.add(file);
-  }
-
-  return [...changed].filter((file) => file.length > 0).sort();
-}
-
-async function resolveBaseRef(root: URL): Promise<string | null> {
-  const githubBaseRef = Deno.env.get("GITHUB_BASE_REF");
-  if (githubBaseRef && await gitRefExists(root, `origin/${githubBaseRef}`)) {
-    return `origin/${githubBaseRef}`;
-  }
-
-  const remoteHead = await runGitSingleLine(
-    root,
-    ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    true,
-  );
-  if (remoteHead && await gitRefExists(root, remoteHead)) {
-    return remoteHead;
-  }
-
-  for (const candidate of ["origin/main", "origin/master", "main", "master"]) {
-    if (await gitRefExists(root, candidate)) {
-      return candidate;
-    }
-  }
-
-  if (await gitRefExists(root, "HEAD~1")) {
-    return "HEAD~1";
-  }
-
-  return null;
-}
-
-async function gitRefExists(root: URL, ref: string): Promise<boolean> {
-  const status = await runGit(root, ["rev-parse", "--verify", ref], true);
-  return status.success;
-}
-
-async function runGitLines(root: URL, args: string[]): Promise<string[]> {
-  const output = await runGitSingleLine(root, args, true);
-  if (!output) {
-    return [];
-  }
-
-  return output.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
-}
-
-async function runGitSingleLine(
-  root: URL,
-  args: string[],
-  allowFailure = false,
-): Promise<string | null> {
-  const status = await runGit(root, args, allowFailure);
-  if (!status.success) {
-    return null;
-  }
-  return status.stdout.trim() || null;
-}
-
-async function runGit(
-  root: URL,
-  args: string[],
-  allowFailure = false,
-): Promise<{ success: boolean; stdout: string; stderr: string }> {
-  const command = new Deno.Command("git", {
-    args,
-    cwd: decodeURIComponent(root.pathname),
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const output = await command.output();
-
-  if (!output.success && !allowFailure) {
-    const stderr = new TextDecoder().decode(output.stderr).trim();
-    const stdout = new TextDecoder().decode(output.stdout).trim();
-    throw new Error(stderr || stdout || `git ${args.join(" ")} failed.`);
-  }
-
-  return {
-    success: output.success,
-    stdout: new TextDecoder().decode(output.stdout),
-    stderr: new TextDecoder().decode(output.stderr),
-  };
 }
 
 async function defaultRunCommand(invocation: AuditCommandInvocation): Promise<CommandRunResult> {

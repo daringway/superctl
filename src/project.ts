@@ -12,6 +12,8 @@ export interface ProjectManifest {
   }>;
   deployment: {
     rootSurface: string;
+    builtInServices?: Array<(typeof BUILTIN_SERVICE_NAMES)[number]>;
+    serverPort?: number;
   };
 }
 
@@ -55,6 +57,7 @@ export async function ensureProjectStructure(root: URL): Promise<ProjectManifest
       surfaces: [],
       deployment: {
         rootSurface: "site",
+        builtInServices: ["system"],
       },
     };
     await saveProjectManifest(root, manifest);

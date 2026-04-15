@@ -19,7 +19,11 @@ export interface CommandOutputWriters {
   stderr?: BinaryWriter;
 }
 
-export type SummaryStepStatus = "passed" | "failed" | "not-run";
+export interface CommandOutputEnvironment {
+  [key: string]: string;
+}
+
+export type SummaryStepStatus = "passed" | "failed" | "skipped" | "not-run";
 
 export interface SummaryStep {
   label: string;
@@ -60,9 +64,16 @@ export function markStepFailed(
   step.detail = detail;
 }
 
+export function markStepSkipped(step: SummaryStep, detail: string | null = null): void {
+  step.status = "skipped";
+  step.metrics = null;
+  step.detail = detail;
+}
+
 export function printCommandSummary(name: string, steps: readonly SummaryStep[]): void {
   const passed = steps.filter((step) => step.status === "passed").length;
   const failed = steps.filter((step) => step.status === "failed").length;
+  const skipped = steps.filter((step) => step.status === "skipped").length;
   const notRun = steps.filter((step) => step.status === "not-run").length;
   const overall = failed === 0 ? "PASSED" : "FAILED";
 
@@ -73,14 +84,19 @@ export function printCommandSummary(name: string, steps: readonly SummaryStep[])
     const icon = step.status === "passed" ? "✓" : step.status === "failed" ? "✗" : "-";
     const message = step.status === "not-run"
       ? "not run"
+      : step.status === "skipped"
+      ? "skipped"
       : formatStepMetrics(step.metrics, step.status);
     console.log(`${icon} ${step.label}: ${message}`);
-    if (step.status === "failed" && step.detail) {
+    if ((step.status === "failed" || step.status === "skipped") && step.detail) {
       console.log(`  ${step.detail}`);
     }
   }
 
   const overallDetails = [`${passed} passed`, `${failed} failed`];
+  if (skipped > 0) {
+    overallDetails.push(`${skipped} skipped`);
+  }
   if (notRun > 0) {
     overallDetails.push(`${notRun} not run`);
   }
@@ -135,11 +151,13 @@ export async function runCommandWithLiveOutput(
   command: string,
   args: string[],
   cwd: string,
+  env: CommandOutputEnvironment | undefined = undefined,
   writers: CommandOutputWriters = {},
 ): Promise<CapturedCommandOutput> {
   const child = new Deno.Command(command, {
     args,
     cwd,
+    env: env ? { ...Deno.env.toObject(), ...env } : undefined,
     stdout: "piped",
     stderr: "piped",
     stdin: "inherit",
@@ -160,7 +178,7 @@ export async function runCommandWithLiveOutput(
 
 function formatStepMetrics(
   metrics: CommandMetrics | null,
-  status: Exclude<SummaryStepStatus, "not-run">,
+  status: Exclude<SummaryStepStatus, "not-run" | "skipped">,
 ): string {
   if (!metrics) {
     return status === "passed" ? "1 of 1 passed" : "0 of 1 passed";

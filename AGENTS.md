@@ -16,7 +16,8 @@ application test flows, and security audit flows.
 - `agent-docs/` is the canonical project-local guidance folder.
 - Track substantial work in `agent-docs/exec-plans/active/` and move completed work to
   `agent-docs/exec-plans/completed/`.
-- Use `deno run -A main.ts gate` for repo-local PR-policy checks.
+- Use `deno task ci:gate`, `deno task ci:test`, and `deno task ci:audit` for this repo's PR-quality
+  checks.
 - Keep `test` test-only.
 - Keep `audit` security-only.
 - Keep repo-root `tests/` reserved for smoke, e2e, fixtures, harnesses, and other non-unit suites.

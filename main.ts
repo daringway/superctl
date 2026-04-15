@@ -4,7 +4,7 @@ import { gateProject } from "./src/gate.ts";
 import { cwdRootUrl } from "./src/paths.ts";
 import { buildProject, devProject, startProject } from "./src/run.ts";
 import { addService, addSurface, initProject } from "./src/scaffold.ts";
-import { testProject } from "./src/verify.ts";
+import { TEST_BUCKETS, type TestBucket, testProject } from "./src/verify.ts";
 import { SUPERCTL_VERSION } from "./src/version.ts";
 
 function usage(): string {
@@ -20,7 +20,7 @@ function usage(): string {
     "  superctl dev",
     "  superctl audit",
     "  superctl gate",
-    "  superctl test",
+    "  superctl test [smoke|unit|api|ui|app]",
     "  superctl doctor",
   ].join("\n");
 }
@@ -95,10 +95,10 @@ export async function main(args: string[]): Promise<void> {
       return;
     case "test":
     case "verify":
-      if (rest.length > 0) {
+      if (rest.length > 1) {
         throw new Error(`Unexpected arguments for "${command}".\n\n${usage()}`);
       }
-      await testProject(root);
+      await testProject(root, parseOptionalTestBucket(rest[0]));
       return;
     case "doctor":
       if (rest.length > 0) {
@@ -109,6 +109,20 @@ export async function main(args: string[]): Promise<void> {
     default:
       throw new Error(usage());
   }
+}
+
+function parseOptionalTestBucket(value: string | undefined): TestBucket | null {
+  if (!value) {
+    return null;
+  }
+
+  if (TEST_BUCKETS.includes(value as TestBucket)) {
+    return value as TestBucket;
+  }
+
+  throw new Error(
+    `Unknown test bucket "${value}". Expected one of ${TEST_BUCKETS.join(", ")}.\n\n${usage()}`,
+  );
 }
 
 if (import.meta.main) {
