@@ -55,7 +55,7 @@ superctl = "github:daringway/superctl"
 
 [tools]
 deno = "2.7.10"
-superctl = "0.1.6"
+superctl = "0.1.7"
 ```
 
 Then install the pinned toolchain from the project root:
