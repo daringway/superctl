@@ -11,9 +11,9 @@ const decoder = new TextDecoder();
 class MemoryWriter implements BinaryWriter {
   #chunks: Uint8Array[] = [];
 
-  async write(data: Uint8Array): Promise<number> {
+  write(data: Uint8Array): Promise<number> {
     this.#chunks.push(new Uint8Array(data));
-    return data.length;
+    return Promise.resolve(data.length);
   }
 
   text(): string {
