@@ -1,28 +1,15 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  denoConfigLabel,
-  type DenoProjectConfig,
-  findDenoProjectConfigFile,
-  loadDenoProjectConfig,
-  loadDenoProjectTasks,
-} from "./deno_config.ts";
+import { denoConfigLabel, findDenoProjectConfigFile } from "./deno_config.ts";
 import { cwdRootUrl } from "./paths.ts";
 import { listTestLayoutIssues } from "./project_checks.ts";
 import { loadProjectManifest, ProjectManifest } from "./project.ts";
 import { SUPERCTL_VERSION } from "./version.ts";
 
-const REQUIRED_DENO_TASKS = ["build", "start", "dev", "check"] as const;
-const REQUIRED_TEST_TASKS = ["test:unit", "test:coverage", "test:e2e"] as const;
 const QUALITY_WORKFLOW_FILES = [
   ".github/workflows/quality.yml",
   ".github/workflows/quality.yaml",
-] as const;
-const STARTER_PLATFORM_ROOT_FILES = [
-  "scripts/start.ts",
-  "scripts/dev.ts",
-  "tests/smoke/runtime_smoke_test.ts",
 ] as const;
 const LOCAL_SUPERCTL_PLUGIN_FILES = [
   "mise-plugin/metadata.lua",
@@ -31,7 +18,6 @@ const LOCAL_SUPERCTL_PLUGIN_FILES = [
   "mise-plugin/hooks/post_install.lua",
   "mise-plugin/hooks/env_keys.lua",
 ] as const;
-const EXPECTED_PLATFORM_RUNTIME_ENTRYPOINT = "packages/runtime/src/index.ts";
 const LOCAL_SUPERCTL_DEFAULT_ROOT = "../../repos/superctl";
 const MISE_TOOL_CONFIG_FILES = [
   "mise.local.toml",
@@ -110,22 +96,8 @@ async function inspectProjectConfiguration(root: URL): Promise<DoctorFinding[]> 
   } else {
     findings.push({
       severity: "info",
-      message: `Using ${denoConfigFile} for Deno task configuration.`,
+      message: `Using ${denoConfigFile} for project configuration.`,
     });
-    const config = await loadDenoProjectConfig(root);
-    const tasks = await loadDenoProjectTasks(root);
-
-    for (const task of [...REQUIRED_DENO_TASKS, ...REQUIRED_TEST_TASKS]) {
-      if (!tasks[task]) {
-        findings.push({
-          severity: "error",
-          message: `Missing required ${denoConfigLabel()} task "${task}".`,
-        });
-      }
-    }
-
-    await inspectStarterPlatformRoot(root, config, findings);
-    await inspectStarterPlatformRootConsistency(root, config, findings);
   }
 
   await inspectQualityWorkflow(root, findings);
@@ -196,74 +168,6 @@ async function inspectTestLayout(root: URL, findings: DoctorFinding[]): Promise<
   }
 }
 
-async function inspectStarterPlatformRoot(
-  root: URL,
-  config: DenoProjectConfig | null,
-  findings: DoctorFinding[],
-): Promise<void> {
-  if (!(await isStarterStyleProject(root))) {
-    return;
-  }
-
-  const platformRoot = config?.superstructure?.platformRoot?.trim();
-  if (!platformRoot) {
-    findings.push({
-      severity: "error",
-      message: `Starter projects must set ${denoConfigLabel()} superstructure.platformRoot.`,
-    });
-    return;
-  }
-
-  const resolvedPlatformRoot = resolveProjectPath(root, platformRoot);
-  if (!(await pathExists(resolvedPlatformRoot))) {
-    findings.push({
-      severity: "error",
-      message: `superstructure.platformRoot "${platformRoot}" does not exist.`,
-    });
-    return;
-  }
-
-  const runtimeEntrypoint = join(resolvedPlatformRoot, EXPECTED_PLATFORM_RUNTIME_ENTRYPOINT);
-  if (!(await isFilePath(runtimeEntrypoint))) {
-    findings.push({
-      severity: "error",
-      message:
-        `superstructure.platformRoot "${platformRoot}" must contain "${EXPECTED_PLATFORM_RUNTIME_ENTRYPOINT}".`,
-    });
-  }
-}
-
-async function inspectStarterPlatformRootConsistency(
-  root: URL,
-  config: DenoProjectConfig | null,
-  findings: DoctorFinding[],
-): Promise<void> {
-  const expectedPlatformRoot = config?.superstructure?.platformRoot?.trim();
-  if (!expectedPlatformRoot) {
-    return;
-  }
-
-  for (const relativePath of STARTER_PLATFORM_ROOT_FILES) {
-    const source = await readTextFileIfExists(root, relativePath);
-    if (!source) {
-      continue;
-    }
-
-    const starterPlatformRoot = extractStarterPlatformRoot(source);
-    if (!starterPlatformRoot) {
-      continue;
-    }
-
-    if (starterPlatformRoot !== expectedPlatformRoot) {
-      findings.push({
-        severity: "error",
-        message:
-          `Starter file "${relativePath}" sets PLATFORM_ROOT to "${starterPlatformRoot}", but ${denoConfigLabel()} superstructure.platformRoot is "${expectedPlatformRoot}".`,
-      });
-    }
-  }
-}
-
 async function inspectLocalSuperctlMode(root: URL, findings: DoctorFinding[]): Promise<void> {
   const superctlToolVersion = await loadMiseToolVersion(root, "superctl");
   if (superctlToolVersion !== "local") {
@@ -327,21 +231,9 @@ async function loadManifestSafely(
   }
 }
 
-async function isStarterStyleProject(root: URL): Promise<boolean> {
-  return (await findFirstExistingFile(root, STARTER_PLATFORM_ROOT_FILES)) !== null;
-}
-
 function resolveProjectPath(root: URL, candidate: string): string {
   const rootPath = resolve(fileURLToPath(root));
   return isAbsolute(candidate) ? resolve(candidate) : resolve(rootPath, candidate);
-}
-
-function extractStarterPlatformRoot(source: string): string | null {
-  const match = source.match(
-    /const PLATFORM_ROOT = (?:"([^"]+)"|'([^']+)');[\s\S]*?Deno\.env\.set\((["'])SUPERSTRUCTURE_PLATFORM_ROOT\3,\s*PLATFORM_ROOT\);/u,
-  );
-
-  return match?.[1] ?? match?.[2] ?? null;
 }
 
 async function loadMiseToolVersion(root: URL, toolName: string): Promise<string | null> {
@@ -411,18 +303,6 @@ async function isFilePath(path: string): Promise<boolean> {
   try {
     const entry = await Deno.stat(path);
     return entry.isFile;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await Deno.stat(path);
-    return true;
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       return false;
@@ -513,6 +393,29 @@ function inspectManifest(manifest: ProjectManifest, findings: DoctorFinding[]): 
     findings.push({
       severity: "error",
       message: `Deployment rootSurface "${rootSurfaceName}" is not marked rootEligible.`,
+    });
+  }
+
+  const builtInServices = manifest.deployment.builtInServices ?? [];
+  const seenBuiltInServices = new Set<string>();
+  for (const serviceName of builtInServices) {
+    if (seenBuiltInServices.has(serviceName)) {
+      findings.push({
+        severity: "error",
+        message: `Deployment builtInServices contains duplicate "${serviceName}".`,
+      });
+    }
+    seenBuiltInServices.add(serviceName);
+  }
+
+  const serverPort = manifest.deployment.serverPort;
+  if (
+    serverPort !== undefined &&
+    (!Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65535)
+  ) {
+    findings.push({
+      severity: "error",
+      message: `Deployment serverPort must be an integer between 1 and 65535, got "${serverPort}".`,
     });
   }
 }

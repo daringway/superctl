@@ -18,10 +18,12 @@ interface ReleaseConfig {
 
 interface ReleaseDependencies {
   createGitTag: (root: URL, tag: string) => Promise<void>;
+  updateReleaseDocs: (root: URL, version: string) => Promise<void>;
 }
 
 const defaultReleaseDependencies: ReleaseDependencies = {
   createGitTag,
+  updateReleaseDocs,
 };
 
 export interface ReleaseBumpOptions {
@@ -46,13 +48,14 @@ export async function bumpReleaseVersion(
   dependencies: Partial<ReleaseDependencies> = {},
 ): Promise<ReleaseBumpResult> {
   const configPath = new URL("deno.json", root);
+  const resolvedDependencies = { ...defaultReleaseDependencies, ...dependencies };
   const config = await readJsonFile<ReleaseConfig>(configPath);
   const currentVersion = readCurrentVersion(config);
   const nextVersion = bumpVersion(currentVersion, kind, options.prerelease ?? false);
 
   await writeJsonFile(configPath, { ...config, version: nextVersion });
+  await resolvedDependencies.updateReleaseDocs(root, nextVersion);
 
-  const resolvedDependencies = { ...defaultReleaseDependencies, ...dependencies };
   if (options.createTag ?? false) {
     await resolvedDependencies.createGitTag(root, formatReleaseTag(nextVersion));
   }
@@ -156,4 +159,41 @@ async function createGitTag(root: URL, tag: string): Promise<void> {
     const stderr = new TextDecoder().decode(output.stderr).trim();
     throw new Error(stderr || `Could not create git tag "${tag}".`);
   }
+}
+
+async function updateReleaseDocs(root: URL, version: string): Promise<void> {
+  await updateFile(
+    new URL("README.md", root),
+    (source) =>
+      replaceRequired(
+        source,
+        /superctl = "\d+\.\d+\.\d+(?:-rc\d+)?"/u,
+        `superctl = "${version}"`,
+      ),
+  );
+  await updateFile(
+    new URL("scripts/setup-mise-project.sh", root),
+    (source) =>
+      replaceRequired(
+        source,
+        /superctl_version="\d+\.\d+\.\d+(?:-rc\d+)?"/u,
+        `superctl_version="${version}"`,
+      ),
+  );
+}
+
+async function updateFile(path: URL, transform: (source: string) => string): Promise<void> {
+  const source = await Deno.readTextFile(path);
+  const next = transform(source);
+  if (next !== source) {
+    await Deno.writeTextFile(path, next);
+  }
+}
+
+function replaceRequired(source: string, pattern: RegExp, replacement: string): string {
+  const next = source.replace(pattern, replacement);
+  if (next === source) {
+    throw new Error(`Could not update ${pattern} in release-managed files.`);
+  }
+  return next;
 }

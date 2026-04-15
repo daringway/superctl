@@ -10,13 +10,13 @@ import {
 import { cwdRootUrl } from "./paths.ts";
 import {
   hasProjectManifest,
-  REQUIRED_GATE_TASKS,
   verifyAgentDocsStructure,
+  verifyDenoConfig,
   verifyManifestFiles,
-  verifyRequiredTasks,
   verifyServiceDbBoundaries,
   verifyTestLayout,
 } from "./project_checks.ts";
+import { listChangedEntries, type ProjectGitChange } from "./git.ts";
 
 export interface GateCommandInvocation {
   command: string;
@@ -34,12 +34,13 @@ export async function gateProject(
   runCommandFn: GateCommandRunner = defaultRunCommand,
 ): Promise<void> {
   const manifestProject = await hasProjectManifest(root);
+  let denoConfigFile: string | null = null;
   const steps = [
     createSummaryStep("Project structure"),
     ...(manifestProject
       ? [createSummaryStep("Manifest files"), createSummaryStep("Service DB boundaries")]
       : []),
-    createSummaryStep("Required tasks"),
+    createSummaryStep("Deno config"),
     createSummaryStep("Test layout"),
     createSummaryStep("Format check"),
     createSummaryStep("Lint"),
@@ -66,11 +67,12 @@ export async function gateProject(
     );
   }
 
-  const requiredTasks = manifestProject ? REQUIRED_GATE_TASKS : ["lint"];
   await collectGateFailure(
     failures,
-    "Required tasks",
-    runGateCheckStep(steps[index++], () => verifyRequiredTasks(root, requiredTasks)),
+    "Deno config",
+    runGateCheckStep(steps[index++], async () => {
+      denoConfigFile = await verifyDenoConfig(root);
+    }),
   );
   await collectGateFailure(
     failures,
@@ -92,12 +94,17 @@ export async function gateProject(
     "Lint",
     runGateCommandStep(
       steps[index++],
-      { command: "deno", args: ["task", "lint"], root, label: "lint" },
+      {
+        command: "deno",
+        args: ["lint", "--config", denoConfigFile ?? "deno.json", "."],
+        root,
+        label: "lint",
+      },
       runCommandFn,
     ),
   );
 
-  const changedFiles = await listChangedFiles(root);
+  const changedFiles = await listChangedEntries(root);
   await collectGateFailure(
     failures,
     "Exec plan completion",
@@ -112,15 +119,19 @@ export async function gateProject(
 
 export async function verifyCompletedExecPlan(
   root: URL,
-  changedFiles: readonly string[],
+  changedFiles: readonly ProjectGitChange[],
 ): Promise<void> {
   if (changedFiles.length === 0) {
     return;
   }
 
-  const execPlanFiles = changedFiles.filter((file) =>
-    file.startsWith("agent-docs/exec-plans/") && file.endsWith(".md")
-  );
+  if (changedFiles.every((change) => change.status === "A" || change.status === "?")) {
+    return;
+  }
+
+  const execPlanFiles = changedFiles
+    .map((change) => change.path)
+    .filter((file) => file.startsWith("agent-docs/exec-plans/") && file.endsWith(".md"));
 
   for (const relativePath of execPlanFiles) {
     if (relativePath.startsWith("agent-docs/exec-plans/completed/")) {
@@ -163,108 +174,6 @@ export function extractPlanStatus(source: string): string | null {
   }
 
   return null;
-}
-
-async function listChangedFiles(root: URL): Promise<string[]> {
-  const changed = new Set<string>();
-  const baseRef = await resolveBaseRef(root);
-  if (baseRef) {
-    for (const file of await runGitLines(root, ["diff", "--name-only", `${baseRef}...HEAD`])) {
-      changed.add(file);
-    }
-  }
-
-  for (const file of await runGitLines(root, ["diff", "--name-only"])) {
-    changed.add(file);
-  }
-  for (const file of await runGitLines(root, ["diff", "--cached", "--name-only"])) {
-    changed.add(file);
-  }
-  for (const file of await runGitLines(root, ["ls-files", "--others", "--exclude-standard"])) {
-    changed.add(file);
-  }
-
-  return [...changed].filter((file) => file.length > 0).sort();
-}
-
-async function resolveBaseRef(root: URL): Promise<string | null> {
-  const githubBaseRef = Deno.env.get("GITHUB_BASE_REF");
-  if (githubBaseRef && await gitRefExists(root, `origin/${githubBaseRef}`)) {
-    return `origin/${githubBaseRef}`;
-  }
-
-  const remoteHead = await runGitSingleLine(
-    root,
-    ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    true,
-  );
-  if (remoteHead && await gitRefExists(root, remoteHead)) {
-    return remoteHead;
-  }
-
-  for (const candidate of ["origin/main", "origin/master", "main", "master"]) {
-    if (await gitRefExists(root, candidate)) {
-      return candidate;
-    }
-  }
-
-  if (await gitRefExists(root, "HEAD~1")) {
-    return "HEAD~1";
-  }
-
-  return null;
-}
-
-async function gitRefExists(root: URL, ref: string): Promise<boolean> {
-  const status = await runGit(root, ["rev-parse", "--verify", ref], true);
-  return status.success;
-}
-
-async function runGitLines(root: URL, args: string[]): Promise<string[]> {
-  const output = await runGitSingleLine(root, args, true);
-  if (!output) {
-    return [];
-  }
-
-  return output.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
-}
-
-async function runGitSingleLine(
-  root: URL,
-  args: string[],
-  allowFailure = false,
-): Promise<string | null> {
-  const status = await runGit(root, args, allowFailure);
-  if (!status.success) {
-    return null;
-  }
-  return status.stdout.trim() || null;
-}
-
-async function runGit(
-  root: URL,
-  args: string[],
-  allowFailure = false,
-): Promise<{ success: boolean; stdout: string; stderr: string }> {
-  const command = new Deno.Command("git", {
-    args,
-    cwd: decodeURIComponent(root.pathname),
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const output = await command.output();
-
-  if (!output.success && !allowFailure) {
-    const stderr = new TextDecoder().decode(output.stderr).trim();
-    const stdout = new TextDecoder().decode(output.stdout).trim();
-    throw new Error(stderr || stdout || `git ${args.join(" ")} failed.`);
-  }
-
-  return {
-    success: output.success,
-    stdout: new TextDecoder().decode(output.stdout),
-    stderr: new TextDecoder().decode(output.stderr),
-  };
 }
 
 async function defaultRunCommand(invocation: GateCommandInvocation): Promise<CommandRunResult> {

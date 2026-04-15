@@ -1,9 +1,4 @@
-import {
-  assertArrayIncludes,
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { join, resolve } from "node:path";
 
 import { auditProject, findSecretScanIssues } from "./audit.ts";
@@ -43,10 +38,14 @@ async function captureDoctorFailure(root: URL): Promise<string[]> {
 async function writeProjectConfig(
   root: URL,
   fileName: "deno.json" | "deno.jsonc",
-  tasks: Record<string, string>,
+  tasks: Record<string, string> = {},
   options: Record<string, unknown> = {},
 ): Promise<void> {
-  const source = JSON.stringify({ ...options, tasks }, null, 2) + "\n";
+  const payload = {
+    ...options,
+    ...(Object.keys(tasks).length > 0 ? { tasks } : {}),
+  };
+  const source = JSON.stringify(payload, null, 2) + "\n";
   await Deno.writeTextFile(new URL(fileName, root), source);
 }
 
@@ -225,18 +224,17 @@ async function createInitFixture(options: { createDefaultPlatform?: boolean } = 
 async function writeFakePlatformRoot(platformRootPath: string): Promise<void> {
   const authEntryPath = join(platformRootPath, "superstructure", "services", "auth", "index.ts");
   const runtimeEntryPath = join(platformRootPath, "packages", "runtime", "src", "index.ts");
+  const workspaceConfigPath = join(platformRootPath, "deno.json");
   await Deno.mkdir(join(platformRootPath, "superstructure", "services", "auth"), {
     recursive: true,
   });
   await Deno.mkdir(join(platformRootPath, "packages", "runtime", "src"), {
     recursive: true,
   });
+  await Deno.writeTextFile(workspaceConfigPath, '{\n  "workspace": ["./packages/*"]\n}\n');
   await Deno.writeTextFile(authEntryPath, "export {};\n");
   await Deno.writeTextFile(runtimeEntryPath, "export {};\n");
 }
-
-const STARTER_UNIT_TEST_IGNORE =
-  "tests/e2e,tests/smoke,tests/db,tests/bruno,tests/fixtures,tests/harness,node_modules,dist,coverage";
 
 Deno.test("usage rejects unknown commands", async () => {
   await assertRejects(
@@ -273,7 +271,8 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     const denoConfig = JSON.parse(
       await Deno.readTextFile(new URL("deno.json", fixture.root)),
     ) as {
-      superstructure?: { platformRoot?: string };
+      imports?: Record<string, string>;
+      links?: string[];
       tasks?: Record<string, string>;
     };
     const surfacesRegistry = await Deno.readTextFile(
@@ -285,8 +284,9 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     const siteSurface = await Deno.readTextFile(
       new URL("superstructure/surfaces/site/surface.tsx", fixture.root),
     );
-    const startScript = await Deno.readTextFile(new URL("scripts/start.ts", fixture.root));
-    const devScript = await Deno.readTextFile(new URL("scripts/dev.ts", fixture.root));
+    const siteSurfaceTest = await Deno.readTextFile(
+      new URL("superstructure/surfaces/site/surface.test.ts", fixture.root),
+    );
     const runtimeSmokeTest = await Deno.readTextFile(
       new URL("tests/smoke/runtime_smoke_test.ts", fixture.root),
     );
@@ -297,32 +297,26 @@ Deno.test("init bootstraps a new project with the default site surface", async (
     );
 
     assertStringIncludes(manifest, '"rootSurface": "site"');
+    assertStringIncludes(manifest, '"builtInServices": [');
+    assertStringIncludes(manifest, '"system"');
+    assertStringIncludes(manifest, '"serverPort": 15000');
     assertStringIncludes(manifest, '"name": "site"');
-    assertEquals(denoConfig.superstructure?.platformRoot, "../../repos/superstructure");
     assertEquals(
-      denoConfig.tasks ? Object.keys(denoConfig.tasks).sort() : [],
-      [
-        "build",
-        "check",
-        "dev",
-        "lint",
-        "start",
-        "test:unit",
-        "test:coverage",
-        "test:e2e",
-        "typecheck",
-      ].sort(),
+      denoConfig.imports?.["@daringway/superstructure-runtime"],
+      "jsr:@daringway/superstructure-runtime@^0.2.0",
     );
+    assertEquals(denoConfig.links, ["../../repos/superstructure"]);
+    assertEquals(denoConfig.tasks, undefined);
     assertStringIncludes(surfacesRegistry, "SiteSurfaceModule");
     assertStringIncludes(siteIndex, "export const SiteSurfaceModule");
     assertStringIncludes(siteSurface, "context.html(renderWelcomePage(runtime))");
     assertStringIncludes(siteSurface, "Welcome to ${projectName}");
     assertStringIncludes(siteSurface, "system/health");
-    assertStringIncludes(startScript, "enabledServices: ['system']");
-    assertStringIncludes(startScript, "applicationVersion: APPLICATION_VERSION");
-    assertEquals(startScript, devScript);
+    assertStringIncludes(siteSurfaceTest, "starter site surface renders the welcome page");
+    assertStringIncludes(siteSurfaceTest, "resolveServerRuntimeConfig");
     assertStringIncludes(runtimeSmokeTest, "starter site renders a welcome page at root and /site");
     assertStringIncludes(runtimeSmokeTest, "/api/system/health");
+    assertStringIncludes(runtimeSmokeTest, "resolveServerRuntimeConfig");
     assertStringIncludes(agents, "agent-docs/exec-plans/active/");
     assertStringIncludes(agentDocsReadme, "exec-plans/completed/");
     await Deno.stat(new URL("agent-docs/exec-plans/active/.gitkeep", fixture.root));
@@ -370,148 +364,25 @@ Deno.test("doctor reports a fresh init as healthy", async () => {
     await withEnv("SUPERSTRUCTURE_PLATFORM_ROOT", undefined, () => initProject(fixture.root));
 
     const messages = await captureConsoleLog(() => doctorProject(fixture.root));
-    assertStringIncludes(messages.join("\n"), "Using deno.json for Deno task configuration.");
+    assertStringIncludes(messages.join("\n"), "Using deno.json for project configuration.");
     assertStringIncludes(messages.join("\n"), "Configuration looks healthy.");
   } finally {
     await fixture.cleanup();
   }
 });
 
-Deno.test("doctor requires superstructure.platformRoot for starter projects", async () => {
+Deno.test("init records the configured starter server port in the manifest", async () => {
   const fixture = await createInitFixture();
 
   try {
-    await withEnv("SUPERSTRUCTURE_PLATFORM_ROOT", undefined, () => initProject(fixture.root));
+    await withEnv("STACK_SERVER_PORT", "16100", () => initProject(fixture.root));
 
-    const denoConfigPath = new URL("deno.json", fixture.root);
-    const denoConfig = JSON.parse(await Deno.readTextFile(denoConfigPath)) as {
-      superstructure?: { platformRoot?: string };
-    };
-    delete denoConfig.superstructure;
-    await Deno.writeTextFile(denoConfigPath, JSON.stringify(denoConfig, null, 2) + "\n");
-
-    const messages = await captureDoctorFailure(fixture.root);
-    assertStringIncludes(
-      messages.join("\n"),
-      "Starter projects must set deno.json or deno.jsonc superstructure.platformRoot.",
-    );
+    const manifest = await Deno.readTextFile(new URL("superstructure.project.json", fixture.root));
+    assertStringIncludes(manifest, '"serverPort": 16100');
   } finally {
     await fixture.cleanup();
   }
 });
-
-Deno.test("doctor rejects missing starter platform roots", async () => {
-  const fixture = await createInitFixture();
-
-  try {
-    await withEnv("SUPERSTRUCTURE_PLATFORM_ROOT", undefined, () => initProject(fixture.root));
-
-    await writeProjectConfig(
-      fixture.root,
-      "deno.json",
-      {
-        build: "deno task typecheck",
-        start: "deno run -A scripts/start.ts",
-        dev: "deno run -A scripts/dev.ts",
-        lint: "deno lint scripts tests superstructure",
-        typecheck:
-          "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/smoke/runtime_smoke_test.ts",
-        "test:unit": `deno test -A . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
-        "test:coverage": `deno test -A --coverage=coverage . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
-        "test:e2e": "deno test -A tests/smoke/runtime_smoke_test.ts",
-        check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
-      },
-      {
-        superstructure: {
-          platformRoot: "../../repos/missing-superstructure",
-        },
-      },
-    );
-
-    const messages = await captureDoctorFailure(fixture.root);
-    assertStringIncludes(
-      messages.join("\n"),
-      'superstructure.platformRoot "../../repos/missing-superstructure" does not exist.',
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-Deno.test("doctor rejects platform roots without the runtime entrypoint", async () => {
-  const fixture = await createInitFixture();
-  const invalidPlatformRoot = join(fixture.workspacePath, "repos", "broken-superstructure");
-
-  try {
-    await withEnv("SUPERSTRUCTURE_PLATFORM_ROOT", undefined, () => initProject(fixture.root));
-    await Deno.mkdir(invalidPlatformRoot, { recursive: true });
-    await Deno.writeTextFile(join(invalidPlatformRoot, "README.md"), "# broken\n");
-
-    await writeProjectConfig(
-      fixture.root,
-      "deno.json",
-      {
-        build: "deno task typecheck",
-        start: "deno run -A scripts/start.ts",
-        dev: "deno run -A scripts/dev.ts",
-        lint: "deno lint scripts tests superstructure",
-        typecheck:
-          "deno check scripts/start.ts scripts/dev.ts superstructure/surfaces/site/index.ts superstructure/surfaces/site/surface.tsx tests/smoke/runtime_smoke_test.ts",
-        "test:unit": `deno test -A . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
-        "test:coverage": `deno test -A --coverage=coverage . --ignore=${STARTER_UNIT_TEST_IGNORE}`,
-        "test:e2e": "deno test -A tests/smoke/runtime_smoke_test.ts",
-        check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
-      },
-      {
-        superstructure: {
-          platformRoot: "../../repos/broken-superstructure",
-        },
-      },
-    );
-
-    const messages = await captureDoctorFailure(fixture.root);
-    assertStringIncludes(
-      messages.join("\n"),
-      'superstructure.platformRoot "../../repos/broken-superstructure" must contain "packages/runtime/src/index.ts".',
-    );
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-for (
-  const relativePath of [
-    "scripts/start.ts",
-    "scripts/dev.ts",
-    "tests/smoke/runtime_smoke_test.ts",
-  ] as const
-) {
-  Deno.test(`doctor catches PLATFORM_ROOT drift in ${relativePath}`, async () => {
-    const fixture = await createInitFixture();
-
-    try {
-      await withEnv("SUPERSTRUCTURE_PLATFORM_ROOT", undefined, () => initProject(fixture.root));
-
-      const fileUrl = new URL(relativePath, fixture.root);
-      const source = await Deno.readTextFile(fileUrl);
-      await Deno.writeTextFile(
-        fileUrl,
-        source.replace(
-          'const PLATFORM_ROOT = "../../repos/superstructure";',
-          'const PLATFORM_ROOT = "../platform";',
-        ),
-      );
-
-      const messages = await captureDoctorFailure(fixture.root);
-      assertStringIncludes(
-        messages.join("\n"),
-        `Starter file "${relativePath}" sets PLATFORM_ROOT to "../platform", but deno.json or deno.jsonc superstructure.platformRoot is "../../repos/superstructure".`,
-      );
-    } finally {
-      await fixture.cleanup();
-    }
-  });
-}
 
 Deno.test("doctor validates healthy local superctl mode", async () => {
   const fixture = await createInitFixture();
@@ -649,40 +520,24 @@ Deno.test("doctor reports stale local superctl binaries", async () => {
   }
 });
 
-Deno.test("init uses SUPERSTRUCTURE_PLATFORM_ROOT when provided", async () => {
+Deno.test("init does not require a local platform root", async () => {
   const fixture = await createInitFixture({ createDefaultPlatform: false });
-  const platformRootPath = join(fixture.workspacePath, "external", "platform-source");
 
   try {
-    await writeFakePlatformRoot(platformRootPath);
-
-    await withEnv(
-      "SUPERSTRUCTURE_PLATFORM_ROOT",
-      platformRootPath,
-      () => initProject(fixture.root),
-    );
+    await withEnv("SUPERSTRUCTURE_PLATFORM_ROOT", undefined, () => initProject(fixture.root));
 
     const denoConfig = JSON.parse(
       await Deno.readTextFile(new URL("deno.json", fixture.root)),
     ) as {
-      superstructure?: { platformRoot?: string };
+      imports?: Record<string, string>;
+      links?: string[];
     };
 
-    assertEquals(denoConfig.superstructure?.platformRoot, "../../external/platform-source");
-  } finally {
-    await fixture.cleanup();
-  }
-});
-
-Deno.test("init fails clearly when no platform root can be resolved", async () => {
-  const fixture = await createInitFixture({ createDefaultPlatform: false });
-
-  try {
-    await assertRejects(
-      () => withEnv("SUPERSTRUCTURE_PLATFORM_ROOT", undefined, () => initProject(fixture.root)),
-      Error,
-      "Unable to resolve the Superstructure platform root for this project.",
+    assertEquals(
+      denoConfig.imports?.["@daringway/superstructure-runtime"],
+      "jsr:@daringway/superstructure-runtime@^0.2.0",
     );
+    assertEquals(denoConfig.links, undefined);
   } finally {
     await fixture.cleanup();
   }
@@ -693,15 +548,7 @@ Deno.test("doctor reports healthy configuration without running verification", a
   const root = new URL(`file://${rootPath}/`);
 
   try {
-    await writeProjectConfig(root, "deno.json", {
-      build: "echo build",
-      start: "echo start",
-      dev: "echo dev",
-      check: "echo check",
-      "test:unit": "echo test",
-      "test:coverage": "echo coverage",
-      "test:e2e": "echo e2e",
-    });
+    await writeProjectConfig(root, "deno.json");
     await writeQualityWorkflow(root);
     await writeProjectManifest(root, {
       schemaVersion: 1,
@@ -721,7 +568,7 @@ Deno.test("doctor reports healthy configuration without running verification", a
     });
 
     const messages = await captureConsoleLog(() => doctorProject(root));
-    assertStringIncludes(messages.join("\n"), "Using deno.json for Deno task configuration.");
+    assertStringIncludes(messages.join("\n"), "Using deno.json for project configuration.");
     assertStringIncludes(messages.join("\n"), "Configuration looks healthy.");
   } finally {
     await Deno.remove(root, { recursive: true });
@@ -733,15 +580,7 @@ Deno.test("doctor reports root surface misconfiguration", async () => {
   const root = new URL(`file://${rootPath}/`);
 
   try {
-    await writeProjectConfig(root, "deno.jsonc", {
-      build: "echo build",
-      start: "echo start",
-      dev: "echo dev",
-      check: "echo check",
-      "test:unit": "echo test",
-      "test:coverage": "echo coverage",
-      "test:e2e": "echo e2e",
-    });
+    await writeProjectConfig(root, "deno.jsonc");
     await writeQualityWorkflow(root);
     await writeProjectManifest(root, {
       schemaVersion: 1,
@@ -767,15 +606,7 @@ Deno.test("doctor reports missing quality workflow", async () => {
   const root = new URL(`file://${rootPath}/`);
 
   try {
-    await writeProjectConfig(root, "deno.json", {
-      build: "echo build",
-      start: "echo start",
-      dev: "echo dev",
-      check: "echo check",
-      "test:unit": "echo test",
-      "test:coverage": "echo coverage",
-      "test:e2e": "echo e2e",
-    });
+    await writeProjectConfig(root, "deno.json");
     await writeProjectManifest(root, {
       schemaVersion: 1,
       services: [],
@@ -803,18 +634,52 @@ Deno.test("doctor reports missing quality workflow", async () => {
   }
 });
 
-Deno.test("build, start, and dev delegate to required deno tasks", async () => {
+Deno.test("build, start, and dev use native project commands", async () => {
   const invocations: string[] = [];
-  const runCommand = ({ command }: { command: string }) => {
-    invocations.push(command);
+  const runCommand = ({ label }: { label: string }) => {
+    invocations.push(label);
     return Promise.resolve(0);
   };
 
-  await buildProject(new URL("file:///tmp/"), runCommand);
-  await startProject(new URL("file:///tmp/"), runCommand);
-  await devProject(new URL("file:///tmp/"), runCommand);
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-run-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
 
-  assertEquals(invocations, ["build", "start", "dev"]);
+  try {
+    await writeProjectConfig(root, "deno.json");
+    await writeProjectManifest(root, {
+      schemaVersion: 1,
+      services: [],
+      surfaces: [
+        {
+          name: "site",
+          directory: "superstructure/surfaces/site",
+          path: "/site",
+          enabled: true,
+          rootEligible: true,
+        },
+      ],
+      deployment: {
+        rootSurface: "site",
+        builtInServices: ["system"],
+      },
+    });
+    await Deno.mkdir(new URL("superstructure/surfaces/site/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("superstructure/surfaces/site/index.ts", root),
+      "export {};\n",
+    );
+
+    await buildProject(root, runCommand);
+    await startProject(root, runCommand);
+    await devProject(root, runCommand);
+
+    assertEquals(
+      invocations,
+      ["typecheck", "build validation", "start", "typecheck", "build validation", "start"],
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
 });
 
 Deno.test("add service and surface scaffold manifest entries and generated registries", async () => {
@@ -822,15 +687,7 @@ Deno.test("add service and surface scaffold manifest entries and generated regis
   const root = new URL(`file://${rootPath}/`);
 
   try {
-    await writeProjectConfig(root, "deno.json", {
-      build: "echo build",
-      start: "echo start",
-      dev: "echo dev",
-      check: "echo check",
-      "test:unit": "echo test",
-      "test:coverage": "echo coverage",
-      "test:e2e": "echo e2e",
-    });
+    await writeProjectConfig(root, "deno.json");
 
     await addService("billing-api", root);
     await addSurface("marketing-site", root);
@@ -861,7 +718,7 @@ Deno.test("add service and surface scaffold manifest entries and generated regis
     assertStringIncludes(servicesRegistry, "BillingApiServiceModule");
     assertStringIncludes(serviceDbSchemaRegistry, "../services/billing-api/db/schema/index.ts");
     assertStringIncludes(surfacesRegistry, "MarketingSiteSurfaceModule");
-    assertStringIncludes(serviceDbIndex, "deriveServiceSchemaName('billing-api')");
+    assertStringIncludes(serviceDbIndex, 'deriveServiceSchemaName("billing-api")');
     assertStringIncludes(serviceDbSchema, "billingApiSchema");
     assertStringIncludes(serviceRoutes, "registerBillingApiServiceRoutes");
   } finally {
@@ -910,83 +767,165 @@ Deno.test("gate rejects custom services importing platform DB internals", async 
   }
 });
 
-Deno.test("test command enforces required test tasks", async () => {
+Deno.test("test command skips empty buckets", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-test-fixture-" });
   const root = new URL(`file://${rootPath}/`);
 
   try {
-    await writeProjectConfig(root, "deno.jsonc", {
-      "test:e2e": "echo e2e",
+    await writeProjectConfig(root, "deno.jsonc");
+    await writeProjectManifest(root, {
+      schemaVersion: 1,
+      services: [],
+      surfaces: [
+        {
+          name: "site",
+          directory: "superstructure/surfaces/site",
+          path: "/site",
+          enabled: true,
+          rootEligible: true,
+        },
+      ],
+      deployment: {
+        rootSurface: "site",
+        builtInServices: ["system"],
+      },
     });
 
-    await addSurface("site", root);
-
-    await assertRejects(
-      () => testProject(root),
-      Error,
-      'Missing required deno.json or deno.jsonc task "test:unit".',
-    );
+    const messages = await captureConsoleLog(() => testProject(root, "unit"));
+    assertStringIncludes(messages.join("\n"), "Test (unit) summary");
+    assertStringIncludes(messages.join("\n"), "No tests found for this bucket.");
+    assertStringIncludes(messages.join("\n"), "Overall: PASSED (0 passed, 0 failed, 1 skipped)");
   } finally {
     await Deno.remove(root, { recursive: true });
   }
 });
 
-Deno.test("test command runs test tasks in test-only order", async () => {
+Deno.test("test command runs buckets in smoke, unit, api, ui, app order", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-test-fixture-" });
   const root = new URL(`file://${rootPath}/`);
   const invocations: string[] = [];
 
   try {
-    await writeProjectConfig(root, "deno.json", {
-      "test:unit": "echo test",
-      "test:bruno": "echo bruno",
-      "test:ai": "echo ai",
-      "test:e2e": "echo e2e",
+    await writeProjectConfig(root, "deno.json");
+    await writeProjectManifest(root, {
+      schemaVersion: 1,
+      services: [
+        {
+          name: "billing",
+          directory: "superstructure/services/billing",
+          enabled: true,
+        },
+      ],
+      surfaces: [
+        {
+          name: "site",
+          directory: "superstructure/surfaces/site",
+          path: "/site",
+          enabled: true,
+          rootEligible: true,
+        },
+      ],
+      deployment: {
+        rootSurface: "site",
+        builtInServices: ["system"],
+      },
     });
 
-    await testProject(root, ({ command }) => {
-      invocations.push(command);
-      return Promise.resolve();
+    await Deno.mkdir(new URL("tests/smoke/", root), { recursive: true });
+    await Deno.mkdir(new URL("tests/e2e/", root), { recursive: true });
+    await Deno.mkdir(new URL("superstructure/services/billing/", root), { recursive: true });
+    await Deno.mkdir(new URL("superstructure/surfaces/site/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("tests/smoke/runtime_smoke_test.ts", root),
+      'Deno.test("smoke", () => {});\n',
+    );
+    await Deno.writeTextFile(
+      new URL("superstructure/services/billing/service.test.ts", root),
+      'Deno.test("unit", () => {});\n',
+    );
+    await Deno.writeTextFile(
+      new URL("superstructure/surfaces/site/surface.test.ts", root),
+      'Deno.test("ui", () => {});\n',
+    );
+    await Deno.writeTextFile(
+      new URL("tests/e2e/app.test.ts", root),
+      'Deno.test("app", () => {});\n',
+    );
+
+    await testProject(root, null, ({ label }) => {
+      invocations.push(label);
+      return Promise.resolve({ code: 0, metrics: { passed: 1, total: 1 } });
     });
 
-    assertEquals(invocations, ["test:unit", "test:bruno", "test:ai", "test:e2e"]);
+    assertEquals(invocations, [
+      "Deno smoke tests",
+      "Deno unit tests",
+      "Deno UI tests",
+      "Deno app tests",
+    ]);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
 });
 
-Deno.test("test command prints a summary at the end", async () => {
+Deno.test("test command prints bucketed and overall summaries", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-test-fixture-" });
   const root = new URL(`file://${rootPath}/`);
 
   try {
-    await writeProjectConfig(root, "deno.json", {
-      "test:unit": "echo test",
-      "test:bruno": "echo bruno",
-      "test:e2e": "echo e2e",
+    await writeProjectConfig(root, "deno.json");
+    await writeProjectManifest(root, {
+      schemaVersion: 1,
+      services: [],
+      surfaces: [
+        {
+          name: "site",
+          directory: "superstructure/surfaces/site",
+          path: "/site",
+          enabled: true,
+          rootEligible: true,
+        },
+      ],
+      deployment: {
+        rootSurface: "site",
+        builtInServices: ["system"],
+      },
     });
+    await Deno.mkdir(new URL("tests/smoke/", root), { recursive: true });
+    await Deno.mkdir(new URL("superstructure/surfaces/site/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("tests/smoke/runtime_smoke_test.ts", root),
+      'Deno.test("smoke", () => {});\n',
+    );
+    await Deno.writeTextFile(
+      new URL("superstructure/surfaces/site/surface.test.ts", root),
+      'Deno.test("ui", () => {});\n',
+    );
 
     const messages = await captureConsoleLog(() =>
-      testProject(root, ({ command }) => {
-        switch (command) {
-          case "test:unit":
-            return Promise.resolve({ code: 0, metrics: { passed: 7, total: 7 } });
-          case "test:bruno":
-            return Promise.resolve({ code: 0, metrics: { passed: 2, total: 2 } });
-          case "test:e2e":
-            return Promise.resolve({ code: 0, metrics: { passed: 3, total: 3 } });
-          default:
-            return Promise.resolve();
+      testProject(root, null, ({ label }) => {
+        if (label === "Deno smoke tests") {
+          return Promise.resolve({ code: 0, metrics: { passed: 2, total: 2 } });
         }
+        if (label === "Deno UI tests") {
+          return Promise.resolve({ code: 0, metrics: { passed: 1, total: 1 } });
+        }
+        return Promise.resolve({ code: 0, metrics: { passed: 1, total: 1 } });
       })
     );
 
     const output = messages.join("\n");
+    assertStringIncludes(output, "Test (smoke) summary");
+    assertStringIncludes(output, "✓ Deno smoke tests: 2 of 2 passed");
+    assertStringIncludes(output, "Test (ui) summary");
+    assertStringIncludes(output, "✓ Deno UI tests: 1 of 1 passed");
     assertStringIncludes(output, "Test summary");
-    assertStringIncludes(output, "✓ Unit tests: 7 of 7 passed");
-    assertStringIncludes(output, "✓ Bruno: 2 of 2 passed");
-    assertStringIncludes(output, "✓ Playwright browser: 3 of 3 passed");
-    assertStringIncludes(output, "Overall: PASSED (4 passed, 0 failed)");
+    assertStringIncludes(output, "✓ Smoke tests: 2 of 2 passed");
+    assertStringIncludes(output, "- Unit tests: skipped");
+    assertStringIncludes(output, "- API tests: skipped");
+    assertStringIncludes(output, "✓ UI tests: 1 of 1 passed");
+    assertStringIncludes(output, "- App tests: skipped");
+    assertStringIncludes(output, "Overall: PASSED (2 passed, 0 failed, 3 skipped)");
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -1032,6 +971,40 @@ Deno.test("gate requires a changed completed exec plan", async () => {
   }
 });
 
+Deno.test("gate skips exec plan requirement for all-added files", async () => {
+  const rootPath = await Deno.makeTempDir({ prefix: "superctl-gate-fixture-" });
+  const root = new URL(`file://${rootPath}/`);
+  const invocations: string[] = [];
+
+  try {
+    await writeProjectConfig(root, "deno.json", {
+      lint: "echo lint",
+      build: "echo build",
+      start: "echo start",
+      dev: "echo dev",
+      check: "echo check",
+      "test:unit": "echo test",
+      "test:coverage": "echo coverage",
+      "test:e2e": "echo e2e",
+    });
+    await Deno.writeTextFile(new URL("AGENTS.md", root), "# AGENTS\n");
+    await Deno.mkdir(new URL("agent-docs/exec-plans/active/", root), { recursive: true });
+    await Deno.mkdir(new URL("agent-docs/exec-plans/completed/", root), { recursive: true });
+    await initGitRepo(root);
+    await commitAll(root, "baseline");
+    await Deno.writeTextFile(new URL("new-file.ts", root), "export const value = 1;\n");
+
+    await gateProject(root, ({ label }) => {
+      invocations.push(label);
+      return Promise.resolve();
+    });
+
+    assertEquals(invocations, ["format check", "lint"]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("gate prints a summary when a step fails", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-gate-fixture-" });
   const root = new URL(`file://${rootPath}/`);
@@ -1061,7 +1034,7 @@ Deno.test("gate prints a summary when a step fails", async () => {
     const output = messages.join("\n");
     assertStringIncludes(output, "Gate summary");
     assertStringIncludes(output, "✓ Project structure: 1 of 1 passed");
-    assertStringIncludes(output, "✓ Required tasks: 1 of 1 passed");
+    assertStringIncludes(output, "✓ Deno config: 1 of 1 passed");
     assertStringIncludes(output, "✓ Test layout: 1 of 1 passed");
     assertStringIncludes(output, "✓ Format check: 1 of 1 passed");
     assertStringIncludes(output, "✗ Lint: 0 of 1 passed");
@@ -1286,15 +1259,7 @@ Deno.test("registry exports include service order once added", async () => {
   const root = new URL(`file://${rootPath}/`);
 
   try {
-    await writeProjectConfig(root, "deno.json", {
-      build: "echo build",
-      start: "echo start",
-      dev: "echo dev",
-      check: "echo check",
-      "test:unit": "echo test",
-      "test:coverage": "echo coverage",
-      "test:e2e": "echo e2e",
-    });
+    await writeProjectConfig(root, "deno.json");
 
     await addService("billing-api", root);
     await addService("analytics-api", root);
@@ -1302,30 +1267,50 @@ Deno.test("registry exports include service order once added", async () => {
     const servicesRegistry = await Deno.readTextFile(
       new URL("superstructure/generated/services.ts", root),
     );
-    assertArrayIncludes(servicesRegistry.split("\n"), [
-      "export const serviceModules = [BillingApiServiceModule, AnalyticsApiServiceModule] as const;",
-    ]);
+    assertStringIncludes(servicesRegistry, "BillingApiServiceModule");
+    assertStringIncludes(servicesRegistry, "AnalyticsApiServiceModule");
+    assertStringIncludes(servicesRegistry, "export const serviceModules = [");
   } finally {
     await Deno.remove(root, { recursive: true });
   }
 });
 
-Deno.test("build reads tasks from deno.jsonc projects", async () => {
+Deno.test("build uses manifest files from deno.jsonc projects", async () => {
   const rootPath = await Deno.makeTempDir({ prefix: "superctl-jsonc-run-fixture-" });
   const root = new URL(`file://${rootPath}/`);
   const invocations: string[] = [];
 
   try {
-    await writeProjectConfig(root, "deno.jsonc", {
-      build: "echo build",
+    await writeProjectConfig(root, "deno.jsonc");
+    await writeProjectManifest(root, {
+      schemaVersion: 1,
+      services: [],
+      surfaces: [
+        {
+          name: "site",
+          directory: "superstructure/surfaces/site",
+          path: "/site",
+          enabled: true,
+          rootEligible: true,
+        },
+      ],
+      deployment: {
+        rootSurface: "site",
+        builtInServices: ["system"],
+      },
     });
+    await Deno.mkdir(new URL("superstructure/surfaces/site/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("superstructure/surfaces/site/index.ts", root),
+      "export {};\n",
+    );
 
-    await buildProject(root, ({ command }) => {
-      invocations.push(command);
+    await buildProject(root, ({ label }) => {
+      invocations.push(label);
       return Promise.resolve(0);
     });
 
-    assertEquals(invocations, ["build"]);
+    assertEquals(invocations, ["typecheck", "build validation"]);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

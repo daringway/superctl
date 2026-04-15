@@ -1,4 +1,4 @@
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { cwdRootUrl } from "./paths.ts";
@@ -21,14 +21,13 @@ import {
 export async function initProject(root: URL = cwdRootUrl()): Promise<void> {
   await assertProjectNotInitialized(root);
   const projectName = resolveProjectName(root);
-  const platformRoot = await resolveStarterPlatformRoot(root);
 
-  await writeStarterDenoConfig(root, platformRoot);
+  await writeStarterDenoConfig(root);
   await writeStarterAgentDocs(root);
   await writeStarterQualityWorkflow(root);
-  await writeStarterScripts(root, projectName, platformRoot);
-  await writeStarterTests(root, projectName, platformRoot);
+  await writeStarterTests(root, projectName);
   await addStarterSiteSurface(projectName, root);
+  await formatProject(root);
 }
 
 export async function addService(name: string, root: URL = cwdRootUrl()): Promise<void> {
@@ -152,6 +151,7 @@ export async function addService(name: string, root: URL = cwdRootUrl()): Promis
   });
   await saveProjectManifest(root, manifest);
   await regenerateProjectRegistries(root, manifest);
+  await formatProject(root);
 }
 
 async function assertProjectNotInitialized(root: URL): Promise<void> {
@@ -228,6 +228,7 @@ export async function addSurface(name: string, root: URL = cwdRootUrl()): Promis
   });
   await saveProjectManifest(root, manifest);
   await regenerateProjectRegistries(root, manifest);
+  await formatProject(root);
 }
 
 async function addStarterSiteSurface(projectName: string, root: URL): Promise<void> {
@@ -236,6 +237,8 @@ async function addStarterSiteSurface(projectName: string, root: URL): Promise<vo
   if (manifest.surfaces.some((entry) => entry.name === name)) {
     throw new Error(`Surface "${name}" already exists.`);
   }
+  manifest.deployment.builtInServices = ["system"];
+  manifest.deployment.serverPort ??= resolveStarterServerPort();
 
   const directory = `${surfaceDirectory(name)}/`;
   await Deno.mkdir(new URL(directory, root), { recursive: true });
@@ -332,6 +335,49 @@ async function addStarterSiteSurface(projectName: string, root: URL): Promise<vo
       "",
     ].join("\n"),
   );
+  await Deno.writeTextFile(
+    new URL(`${directory}surface.test.ts`, root),
+    [
+      'import { resolveServerRuntimeConfig } from "@daringway/superstructure-config";',
+      "",
+      'import { createSiteSurfaceApp } from "./surface.tsx";',
+      "",
+      `const PROJECT_NAME = ${JSON.stringify(projectName)};`,
+      "",
+      "function createTestRuntime() {",
+      '  const env = { NODE_ENV: "test" };',
+      "  const runtime = resolveServerRuntimeConfig(env, { cwd: Deno.cwd() });",
+      "  return {",
+      "    runtime: {",
+      '      mode: "test",',
+      "      publicUrl: runtime.publicUrl,",
+      "      apiBaseUrl: runtime.apiBaseUrl,",
+      "      projectRoot: Deno.cwd(),",
+      "    },",
+      "    publicUrl: runtime.publicUrl,",
+      "  };",
+      "}",
+      "",
+      'Deno.test("starter site surface renders the welcome page", async () => {',
+      "  const { runtime, publicUrl } = createTestRuntime();",
+      "  const app = createSiteSurfaceApp(runtime);",
+      "  const response = await app.request(`${publicUrl}/`);",
+      "",
+      "  if (response.status !== 200) {",
+      "    throw new Error(`Expected starter site surface to return 200, got ${response.status}.`);",
+      "  }",
+      "",
+      "  const html = await response.text();",
+      "  if (!html.includes(`Welcome to ${PROJECT_NAME}`)) {",
+      '    throw new Error("Expected starter site surface to include the welcome heading.");',
+      "  }",
+      "  if (!html.includes(`${publicUrl}/api/system/health`)) {",
+      '    throw new Error("Expected starter site surface to include the health link.");',
+      "  }",
+      "});",
+      "",
+    ].join("\n"),
+  );
 
   manifest.surfaces.push({
     name,
@@ -344,54 +390,90 @@ async function addStarterSiteSurface(projectName: string, root: URL): Promise<vo
   await regenerateProjectRegistries(root, manifest);
 }
 
-async function writeStarterDenoConfig(root: URL, platformRoot: string): Promise<void> {
-  const unitTestIgnore =
-    "tests/e2e,tests/smoke,tests/db,tests/bruno,tests/fixtures,tests/harness,node_modules,dist,coverage";
+const STARTER_SUPERSTRUCTURE_VERSION = "^0.2.0";
+const STARTER_DRIZZLE_VERSION = "^0.45.2";
+const STARTER_DRIZZLE_ZOD_VERSION = "^0.8.3";
+const STARTER_HONO_VERSION = "^4.12.12";
+const STARTER_POSTGRES_VERSION = "^3.4.8";
+const STARTER_RESEND_VERSION = "^4.8.0";
+const STARTER_ZOD_VERSION = "^4.3.6";
+
+async function writeStarterDenoConfig(root: URL): Promise<void> {
+  const starterLinks = await resolveStarterLinks(root);
   await writeJsonFile(new URL("deno.json", root), {
     nodeModulesDir: "auto",
+    ...(starterLinks ? { links: starterLinks } : {}),
     imports: {
-      "@daringway/superstructure-auth-core": `${platformRoot}/packages/auth-core/src/index.ts`,
-      "@daringway/superstructure-config": `${platformRoot}/packages/config/src/index.ts`,
-      "@daringway/superstructure-contracts": `${platformRoot}/packages/contracts/src/index.ts`,
+      "@daringway/superstructure-auth-core":
+        `jsr:@daringway/superstructure-auth-core@${STARTER_SUPERSTRUCTURE_VERSION}`,
+      "@daringway/superstructure-config":
+        `jsr:@daringway/superstructure-config@${STARTER_SUPERSTRUCTURE_VERSION}`,
+      "@daringway/superstructure-contracts":
+        `jsr:@daringway/superstructure-contracts@${STARTER_SUPERSTRUCTURE_VERSION}`,
       "@daringway/superstructure-observability":
-        `${platformRoot}/packages/observability/src/index.ts`,
-      "@daringway/superstructure-permissions": `${platformRoot}/packages/permissions/src/index.ts`,
-      "@daringway/superstructure-runtime": `${platformRoot}/packages/runtime/src/index.ts`,
-      "drizzle-orm": "npm:drizzle-orm@^0.44.7",
-      "drizzle-orm/pg-core": "npm:drizzle-orm@^0.44.7/pg-core",
-      "drizzle-orm/postgres-js": "npm:drizzle-orm@^0.44.7/postgres-js",
-      "drizzle-zod": "npm:drizzle-zod@^0.8.3",
-      hono: "npm:hono@^4.12.10",
-      "hono/cors": "npm:hono@^4.12.10/cors",
-      postgres: "npm:postgres@^3.4.8",
-      resend: "npm:resend@^4.8.0",
-      zod: "npm:zod@^4.3.6",
-    },
-    superstructure: {
-      platformRoot,
-    },
-    tasks: {
-      build: "deno task typecheck",
-      start: "deno run -A scripts/start.ts",
-      dev: "deno run -A scripts/dev.ts",
-      lint: "deno lint scripts tests superstructure",
-      typecheck: [
-        "deno check",
-        "scripts/start.ts",
-        "scripts/dev.ts",
-        "superstructure/surfaces/site/index.ts",
-        "superstructure/surfaces/site/surface.tsx",
-        "tests/smoke/runtime_smoke_test.ts",
-      ].join(" "),
-      "test:unit": `deno test -A . --ignore=${unitTestIgnore}`,
-      "test:coverage": `deno test -A --coverage=coverage . --ignore=${unitTestIgnore}`,
-      "test:e2e": "deno test -A tests/smoke/runtime_smoke_test.ts",
-      check: "deno task lint && deno task typecheck && deno task test:unit && deno task build",
+        `jsr:@daringway/superstructure-observability@${STARTER_SUPERSTRUCTURE_VERSION}`,
+      "@daringway/superstructure-permissions":
+        `jsr:@daringway/superstructure-permissions@${STARTER_SUPERSTRUCTURE_VERSION}`,
+      "@daringway/superstructure-runtime":
+        `jsr:@daringway/superstructure-runtime@${STARTER_SUPERSTRUCTURE_VERSION}`,
+      "drizzle-orm": `npm:drizzle-orm@${STARTER_DRIZZLE_VERSION}`,
+      "drizzle-orm/pg-core": `npm:drizzle-orm@${STARTER_DRIZZLE_VERSION}/pg-core`,
+      "drizzle-orm/postgres-js": `npm:drizzle-orm@${STARTER_DRIZZLE_VERSION}/postgres-js`,
+      "drizzle-zod": `npm:drizzle-zod@${STARTER_DRIZZLE_ZOD_VERSION}`,
+      hono: `npm:hono@${STARTER_HONO_VERSION}`,
+      "hono/cors": `npm:hono@${STARTER_HONO_VERSION}/cors`,
+      postgres: `npm:postgres@${STARTER_POSTGRES_VERSION}`,
+      resend: `npm:resend@${STARTER_RESEND_VERSION}`,
+      zod: `npm:zod@${STARTER_ZOD_VERSION}`,
     },
     fmt: {
       lineWidth: 100,
     },
   });
+}
+
+async function resolveStarterLinks(root: URL): Promise<string[] | null> {
+  const workspaceRoot = await findWorkspaceRoot(root);
+  if (!workspaceRoot) {
+    return null;
+  }
+
+  const projectRoot = fileURLToPath(root);
+  const superstructureRoot = join(workspaceRoot, "repos", "superstructure");
+  return [normalizeRelativePath(relative(projectRoot, superstructureRoot))];
+}
+
+async function findWorkspaceRoot(root: URL): Promise<string | null> {
+  let current = resolve(fileURLToPath(root));
+
+  while (true) {
+    const candidate = join(current, "repos", "superstructure", "deno.json");
+    if (await pathExists(candidate)) {
+      return current;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.replaceAll("\\", "/");
 }
 
 async function writeStarterAgentDocs(root: URL): Promise<void> {
@@ -574,165 +656,116 @@ async function writeStarterQualityWorkflow(root: URL): Promise<void> {
   );
 }
 
-async function writeStarterScripts(
-  root: URL,
-  projectName: string,
-  platformRoot: string,
-): Promise<void> {
-  await Deno.mkdir(new URL("scripts/", root), { recursive: true });
-
-  const source = [
-    "import { startServer } from '@daringway/superstructure-runtime';",
-    "",
-    `const APPLICATION_NAME = ${JSON.stringify(projectName)};`,
-    "const APPLICATION_VERSION = '0.1.0';",
-    `const PLATFORM_ROOT = ${JSON.stringify(platformRoot)};`,
-    "",
-    "Deno.env.set('SUPERSTRUCTURE_PLATFORM_ROOT', PLATFORM_ROOT);",
-    "",
-    "await startServer({",
-    "  applicationName: APPLICATION_NAME,",
-    "  applicationVersion: APPLICATION_VERSION,",
-    "  serviceName: 'site',",
-    "  enabledServices: ['system'],",
-    "});",
-    "",
-  ].join("\n");
-
-  await Deno.writeTextFile(new URL("scripts/start.ts", root), source);
-  await Deno.writeTextFile(new URL("scripts/dev.ts", root), source);
-}
-
 async function writeStarterTests(
   root: URL,
   projectName: string,
-  platformRoot: string,
 ): Promise<void> {
   await Deno.mkdir(new URL("tests/smoke/", root), { recursive: true });
 
   await Deno.writeTextFile(
     new URL("tests/smoke/runtime_smoke_test.ts", root),
     [
-      "import { createServerApp } from '@daringway/superstructure-runtime';",
+      'import { resolveServerRuntimeConfig } from "@daringway/superstructure-config";',
+      'import { createServerApp } from "@daringway/superstructure-runtime";',
       "",
       `const PROJECT_NAME = ${JSON.stringify(projectName)};`,
-      "const BASE_URL = 'http://localhost:15000';",
-      `const PLATFORM_ROOT = ${JSON.stringify(platformRoot)};`,
       "",
-      "Deno.env.set('SUPERSTRUCTURE_PLATFORM_ROOT', PLATFORM_ROOT);",
+      "function createTestEnv() {",
+      '  const env = { NODE_ENV: "test" };',
+      "  const runtime = resolveServerRuntimeConfig(env, { cwd: Deno.cwd() });",
+      "  return {",
+      "    runtime,",
+      "    env: {",
+      "      APP_BASE_URL: runtime.publicUrl,",
+      "      STACK_SERVER_PORT: String(runtime.port),",
+      "      STACK_SERVER_PUBLIC_URL: runtime.publicUrl,",
+      '      NODE_ENV: "test",',
+      "    },",
+      "  };",
+      "}",
       "",
       "Deno.test({",
-      "  name: 'starter site renders a welcome page at root and /site',",
+      '  name: "starter site renders a welcome page at root and /site",',
       "  sanitizeOps: false,",
       "  sanitizeResources: false,",
       "  fn: async () => {",
-      "  const app = await createServerApp({",
-      "    env: {",
-      "      APP_BASE_URL: BASE_URL,",
-      "      STACK_SERVER_PUBLIC_URL: BASE_URL,",
-      "      NODE_ENV: 'test',",
-      "    },",
-      "    enabledServices: ['system'],",
-      "  });",
+      "    const { env, runtime } = createTestEnv();",
+      "    const app = await createServerApp({ cwd: Deno.cwd(), env });",
       "",
-      "  for (const path of ['/', '/site']) {",
-      "    const response = await app.request(`${BASE_URL}${path}`);",
+      '    for (const path of ["/", "/site"]) {',
+      "      const response = await app.request(`${runtime.publicUrl}${path}`);",
+      "      if (response.status !== 200) {",
+      "        throw new Error(`Expected ${path} to return 200, got ${response.status}.`);",
+      "      }",
+      "",
+      '      const contentType = response.headers.get("content-type") ?? "";',
+      '      if (!contentType.includes("text/html")) {',
+      "        throw new Error(`Expected ${path} to return text/html, got ${contentType}.`);",
+      "      }",
+      "",
+      "      const html = await response.text();",
+      "      if (!html.includes(`Welcome to ${PROJECT_NAME}`)) {",
+      "        throw new Error(`Expected ${path} to include the welcome heading.`);",
+      "      }",
+      "      if (!html.includes(`${runtime.publicUrl}/api/system/health`)) {",
+      "        throw new Error(`Expected ${path} to include the system health link.`);",
+      "      }",
+      "    }",
+      "  },",
+      "});",
+      "",
+      "Deno.test({",
+      '  name: "starter system health endpoint responds",',
+      "  sanitizeOps: false,",
+      "  sanitizeResources: false,",
+      "  fn: async () => {",
+      "    const { env, runtime } = createTestEnv();",
+      "    const app = await createServerApp({ cwd: Deno.cwd(), env });",
+      "",
+      "    const response = await app.request(`${runtime.publicUrl}/api/system/health`);",
       "    if (response.status !== 200) {",
-      "      throw new Error(`Expected ${path} to return 200, got ${response.status}.`);",
+      "      throw new Error(`Expected /api/system/health to return 200, got ${response.status}.`);",
       "    }",
-      "",
-      "    const contentType = response.headers.get('content-type') ?? '';",
-      "    if (!contentType.includes('text/html')) {",
-      "      throw new Error(`Expected ${path} to return text/html, got ${contentType}.`);",
-      "    }",
-      "",
-      "    const html = await response.text();",
-      "    if (!html.includes(`Welcome to ${PROJECT_NAME}`)) {",
-      "      throw new Error(`Expected ${path} to include the welcome heading.`);",
-      "    }",
-      "    if (!html.includes(`${BASE_URL}/api/system/health`)) {",
-      "      throw new Error(`Expected ${path} to include the system health link.`);",
-      "    }",
-      "  }",
-      "  },",
-      "});",
-      "",
-      "Deno.test({",
-      "  name: 'starter system health endpoint responds',",
-      "  sanitizeOps: false,",
-      "  sanitizeResources: false,",
-      "  fn: async () => {",
-      "  const app = await createServerApp({",
-      "    env: {",
-      "      APP_BASE_URL: BASE_URL,",
-      "      STACK_SERVER_PUBLIC_URL: BASE_URL,",
-      "      NODE_ENV: 'test',",
-      "    },",
-      "    enabledServices: ['system'],",
-      "  });",
-      "",
-      "  const response = await app.request(`${BASE_URL}/api/system/health`);",
-      "  if (response.status !== 200) {",
-      "    throw new Error(`Expected /api/system/health to return 200, got ${response.status}.`);",
-      "  }",
       "  },",
       "});",
       "",
     ].join("\n"),
   );
-}
-
-async function resolveStarterPlatformRoot(root: URL): Promise<string> {
-  const rootPath = resolve(fileURLToPath(root));
-  const envPlatformRoot = Deno.env.get("SUPERSTRUCTURE_PLATFORM_ROOT")?.trim();
-  const candidates = [
-    ...(envPlatformRoot ? [envPlatformRoot] : []),
-    "../../repos/superstructure",
-    "../superstructure",
-    "../platform",
-  ];
-  const attemptedPaths: string[] = [];
-
-  for (const candidate of candidates) {
-    const resolvedCandidate = envPlatformRoot === candidate
-      ? resolve(candidate)
-      : resolve(rootPath, candidate);
-    attemptedPaths.push(resolvedCandidate);
-
-    if (await isValidPlatformRoot(resolvedCandidate)) {
-      return normalizePath(relative(rootPath, resolvedCandidate));
-    }
-  }
-
-  throw new Error(
-    [
-      "Unable to resolve the Superstructure platform root for this project.",
-      "Set SUPERSTRUCTURE_PLATFORM_ROOT or place the platform repo at one of these paths:",
-      "  ../../repos/superstructure",
-      "  ../superstructure",
-      "  ../platform",
-      "Attempted:",
-      ...attemptedPaths.map((path) => `  ${path}`),
-    ].join("\n"),
-  );
-}
-
-async function isValidPlatformRoot(path: string): Promise<boolean> {
-  try {
-    const entry = await Deno.stat(join(path, "packages", "runtime", "src", "index.ts"));
-    return entry.isFile;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-function normalizePath(path: string): string {
-  return path.length === 0 ? "." : path.split(sep).join("/");
 }
 
 function resolveProjectName(root: URL): string {
   return basename(resolve(fileURLToPath(root)));
+}
+
+function resolveStarterServerPort(): number {
+  const rawValue = Deno.env.get("STACK_SERVER_PORT")?.trim() || Deno.env.get("PORT")?.trim();
+  if (!rawValue) {
+    return 15000;
+  }
+
+  if (!/^\d+$/.test(rawValue)) {
+    throw new Error(`Invalid starter server port "${rawValue}". Expected a positive integer.`);
+  }
+
+  const port = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(
+      `Invalid starter server port "${rawValue}". Expected a port between 1 and 65535.`,
+    );
+  }
+
+  return port;
+}
+
+async function formatProject(root: URL): Promise<void> {
+  const child = new Deno.Command("deno", {
+    args: ["fmt", "."],
+    cwd: fileURLToPath(root),
+    stdout: "inherit",
+    stderr: "inherit",
+  }).spawn();
+  const status = await child.status;
+  if (status.code !== 0) {
+    throw new Error("Could not format generated project files.");
+  }
 }

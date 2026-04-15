@@ -21,9 +21,11 @@ superctl doctor
 ```
 
 `doctor` checks project configuration without running the full test pipeline. `init` bootstraps the
-current directory with a runnable Superstructure starter: `deno.json`, runtime scripts, a smoke test
-under `tests/smoke/`, a GitHub Actions quality workflow, generated registries, and a default HTML
-`site` surface so `superctl start` can serve a welcome page immediately.
+current directory with a runnable Superstructure starter: `deno.json`, a smoke test under
+`tests/smoke/`, a GitHub Actions quality workflow, generated registries, and a default HTML `site`
+surface so `superctl start` can serve a welcome page immediately. Starter `start` and `dev` tasks
+run through the published Superstructure runtime CLI instead of generated `scripts/start.ts` and
+`scripts/dev.ts`.
 
 `superctl gate` is the PR-quality and policy command. It runs format and lint checks, validates the
 project structure contract, enforces the repo-root `tests/` layout policy, and enforces the
@@ -35,30 +37,51 @@ expensive PR check.
 
 ## Install
 
-Install from GitHub Releases with `mise`:
+For initial project setup, use the one-liner first. It checks that `mise` is installed, creates
+`.mise.toml`, runs `mise trust`, and installs the pinned toolchain:
 
 ```bash
-mise use -g github:daringway/superctl@v0.1.3
+curl -fsSL https://raw.githubusercontent.com/daringway/superctl/main/scripts/setup-mise-project.sh | bash
+```
+
+To set it up manually, commit a repo-local `.mise.toml` like:
+
+```toml
+[tool_alias]
+superctl = "github:daringway/superctl"
+
+[tools]
+deno = "2.7.10"
+superctl = "main"
+```
+
+Then install the pinned toolchain from the project root:
+
+```bash
+mise trust
 mise install
 ```
 
-The GitHub backend consumes published GitHub Releases, not bare git tags. Merged pull requests to
-`main` create the matching `v*` tag and publish the release assets automatically.
+This keeps both `deno` and `superctl` repo-local instead of doing a global install. Commit the
+`.mise.toml` pin with the project.
 
-Within the `autopilot-ai-dev` workspace, apps should link the canonical plugin under
-`repos/superctl/mise-plugin` and install whatever `superctl` version the app pins in its committed
-`.mise.toml`:
+When developing inside a workspace that already contains a local `repos/superctl` checkout, add a
+repo-local `mise.local.toml` override so the project uses the local source build:
 
-```bash
-mise plugin link --force superctl /absolute/path/to/repos/superctl/mise-plugin
-mise install -f superctl
+```toml
+[tools]
+superctl = "local"
+
+[env]
+SUPERCTL_ROOT = "/absolute/path/to/repos/superctl"
 ```
 
-For opt-in local CLI development against a sibling `superctl` checkout:
+The bootstrap script writes this override automatically when it detects the standard workspace
+layout.
 
-```bash
-SUPERCTL_ROOT=/absolute/path/to/repos/superctl mise install -f superctl@local
-```
+The plugin backend consumes published GitHub Releases, not bare git tags. Merged pull requests to
+`main` create the matching `v*` tag and publish the release assets automatically. On fresh machines,
+export `GITHUB_TOKEN` before `mise install` to avoid GitHub API rate-limit failures.
 
 ## Development
 
@@ -70,7 +93,8 @@ deno task check
 ## Releases
 
 `deno.json` is the source of truth for the `superctl` version. Use the release bump script to update
-that version and emit the matching git tag name:
+that version, rewrite the README and bootstrap script to the same version, and emit the matching git
+tag name:
 
 ```bash
 deno task release:bump -- bump patch

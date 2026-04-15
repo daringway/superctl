@@ -1,3 +1,5 @@
 import { testProject } from "../src/verify.ts";
 
-await testProject();
+if (import.meta.main) {
+  await testProject();
+}

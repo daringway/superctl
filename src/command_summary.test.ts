@@ -50,6 +50,7 @@ Deno.test("runCommandWithLiveOutput mirrors and captures child output", async ()
     Deno.execPath(),
     ["eval", program],
     Deno.cwd(),
+    undefined,
     { stdout: stdoutWriter, stderr: stderrWriter },
   );
 

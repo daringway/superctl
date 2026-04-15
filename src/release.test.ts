@@ -58,11 +58,24 @@ Deno.test("bumpReleaseVersion updates deno.json and returns the matching tag", a
       new URL("deno.json", root),
       JSON.stringify({ version: "0.1.2", name: "superctl" }, null, 2) + "\n",
     );
+    await Deno.writeTextFile(
+      new URL("README.md", root),
+      'superctl = "0.1.2"\n',
+    );
+    await Deno.mkdir(new URL("scripts/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("scripts/setup-mise-project.sh", root),
+      'superctl_version="0.1.2"\n',
+    );
 
     const result = await bumpReleaseVersion(root, "minor", { prerelease: true });
     const updatedConfig = JSON.parse(
       await Deno.readTextFile(new URL("deno.json", root)),
     ) as { version: string };
+    const updatedReadme = await Deno.readTextFile(new URL("README.md", root));
+    const updatedSetupScript = await Deno.readTextFile(
+      new URL("scripts/setup-mise-project.sh", root),
+    );
 
     assertEquals(result, {
       previousVersion: "0.1.2",
@@ -70,6 +83,8 @@ Deno.test("bumpReleaseVersion updates deno.json and returns the matching tag", a
       tag: "v0.2.0-rc1",
     });
     assertEquals(updatedConfig.version, "0.2.0-rc1");
+    assertEquals(updatedReadme, 'superctl = "0.2.0-rc1"\n');
+    assertEquals(updatedSetupScript, 'superctl_version="0.2.0-rc1"\n');
   } finally {
     await Deno.remove(rootPath, { recursive: true });
   }
@@ -84,6 +99,12 @@ Deno.test("bumpReleaseVersion can create a matching git tag through its dependen
     await Deno.writeTextFile(
       new URL("deno.json", root),
       JSON.stringify({ version: "0.1.2" }, null, 2) + "\n",
+    );
+    await Deno.writeTextFile(new URL("README.md", root), 'superctl = "0.1.2"\n');
+    await Deno.mkdir(new URL("scripts/", root), { recursive: true });
+    await Deno.writeTextFile(
+      new URL("scripts/setup-mise-project.sh", root),
+      'superctl_version="0.1.2"\n',
     );
 
     const result = await bumpReleaseVersion(
